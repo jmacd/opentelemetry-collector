@@ -5,7 +5,7 @@ go 1.14
 require (
 	contrib.go.opencensus.io/exporter/prometheus v0.2.0
 	github.com/OneOfOne/xxhash v1.2.5 // indirect
-	github.com/Shopify/sarama v1.27.2
+	github.com/Shopify/sarama v1.28.0
 	github.com/StackExchange/wmi v0.0.0-20180116203802-5d049714c4a6 // indirect
 	github.com/antonmedv/expr v1.8.9
 	github.com/apache/thrift v0.13.0
@@ -45,7 +45,7 @@ require (
 	github.com/spf13/cobra v1.1.1
 	github.com/spf13/pflag v1.0.5
 	github.com/spf13/viper v1.7.1
-	github.com/stretchr/testify v1.6.1
+	github.com/stretchr/testify v1.7.0
 	github.com/tinylib/msgp v1.1.5
 	github.com/uber/jaeger-lib v2.4.0+incompatible
 	go.opencensus.io v0.22.5
