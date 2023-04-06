@@ -33,6 +33,10 @@ type Config struct {
 	// Larger batches are split into smaller units.
 	// Default value is 0, that means no maximum size.
 	SendBatchMaxSize uint32 `mapstructure:"send_batch_max_size"`
+
+	// Backpressure indicates that the sender will wait for the
+	// batch to be processed before repsonding.
+	BackPressure bool `mapstructure:"back_pressure"`
 }
 
 var _ component.Config = (*Config)(nil)

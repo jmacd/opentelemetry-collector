@@ -46,14 +46,20 @@ type batchProcessor struct {
 	timeout          time.Duration
 	sendBatchSize    int
 	sendBatchMaxSize int
+	backPressure     bool
 
-	newItem chan any
+	newItem chan chanItem
 	batch   batch
 
 	shutdownC  chan struct{}
 	goroutines sync.WaitGroup
 
 	telemetry *batchProcessorTelemetry
+}
+
+type chanItem struct {
+	waiter chan error
+	data   any
 }
 
 type batch interface {
@@ -64,7 +70,10 @@ type batch interface {
 	itemCount() int
 
 	// add item to the current batch
-	add(item any)
+	add(item chanItem)
+
+	// add a waiter
+	addWaiter(ch <-chan error)
 }
 
 var _ consumer.Traces = (*batchProcessor)(nil)
@@ -85,7 +94,7 @@ func newBatchProcessor(set processor.CreateSettings, cfg *Config, batch batch, u
 		sendBatchSize:    int(cfg.SendBatchSize),
 		sendBatchMaxSize: int(cfg.SendBatchMaxSize),
 		timeout:          cfg.Timeout,
-		newItem:          make(chan any, runtime.NumCPU()),
+		newItem:          make(chan chanItem, runtime.NumCPU()),
 		batch:            batch,
 		shutdownC:        make(chan struct{}, 1),
 	}, nil
@@ -134,9 +143,6 @@ func (bp *batchProcessor) startProcessingCycle() {
 			}
 			return
 		case item := <-bp.newItem:
-			if item == nil {
-				continue
-			}
 			bp.processItem(item)
 		case <-bp.timer.C:
 			if bp.batch.itemCount() > 0 {
@@ -147,8 +153,11 @@ func (bp *batchProcessor) startProcessingCycle() {
 	}
 }
 
-func (bp *batchProcessor) processItem(item any) {
+func (bp *batchProcessor) processItem(item chanItem) {
 	bp.batch.add(item)
+	if item.waiter != nil {
+		bp.batch.addWaiter(item.waiter)
+	}
 	sent := false
 	for bp.batch.itemCount() >= bp.sendBatchSize {
 		sent = true
@@ -180,23 +189,54 @@ func (bp *batchProcessor) sendItems(trigger trigger) {
 	}
 }
 
+func (bp *batchProcessor) consume(ctx context.Context, data any) error {
+	item := chanItem{
+		data: data,
+	}
+	if bp.backPressure {
+		item.waiter = make(chan error)
+	}
+
+	select {
+	case <-ctx.Done():
+		return ctx.Err()
+	case bp.newItem <- item:
+		// sent!
+		if !bp.backPressure {
+			return nil
+		}
+	}
+
+	select {
+	case err := <-item.waiter:
+		return err
+	case <-ctx.Done():
+		return ctx.Err()
+	}
+}
+
 // ConsumeTraces implements TracesProcessor
-func (bp *batchProcessor) ConsumeTraces(_ context.Context, td ptrace.Traces) error {
-	bp.newItem <- td
-	return nil
+func (bp *batchProcessor) ConsumeTraces(ctx context.Context, td ptrace.Traces) error {
+	if td.SpanCount() == 0 {
+		return nil
+	}
+	return bp.consume(ctx, td)
 }
 
 // ConsumeMetrics implements MetricsProcessor
-func (bp *batchProcessor) ConsumeMetrics(_ context.Context, md pmetric.Metrics) error {
-	// First thing is convert into a different internal format
-	bp.newItem <- md
-	return nil
+func (bp *batchProcessor) ConsumeMetrics(ctx context.Context, md pmetric.Metrics) error {
+	if md.DataPointCount() == 0 {
+		return nil
+	}
+	return bp.consume(ctx, md)
 }
 
 // ConsumeLogs implements LogsProcessor
-func (bp *batchProcessor) ConsumeLogs(_ context.Context, ld plog.Logs) error {
-	bp.newItem <- ld
-	return nil
+func (bp *batchProcessor) ConsumeLogs(ctx context.Context, ld plog.Logs) error {
+	if ld.LogRecordCount() == 0 {
+		return nil
+	}
+	return bp.consume(ctx, ld)
 }
 
 // newBatchTracesProcessor creates a new batch processor that batches traces by size or with timeout
@@ -214,11 +254,18 @@ func newBatchLogsProcessor(set processor.CreateSettings, next consumer.Logs, cfg
 	return newBatchProcessor(set, cfg, newBatchLogs(next), useOtel)
 }
 
+type waiters []<-chan error
+
+func (w *waiters) addWaiter(wch <-chan error) {
+	*w = append(*w, wch)
+}
+
 type batchTraces struct {
 	nextConsumer consumer.Traces
 	traceData    ptrace.Traces
 	spanCount    int
 	sizer        ptrace.Sizer
+	waiters
 }
 
 func newBatchTraces(nextConsumer consumer.Traces) *batchTraces {
@@ -226,14 +273,9 @@ func newBatchTraces(nextConsumer consumer.Traces) *batchTraces {
 }
 
 // add updates current batchTraces by adding new TraceData object
-func (bt *batchTraces) add(item any) {
-	td := item.(ptrace.Traces)
-	newSpanCount := td.SpanCount()
-	if newSpanCount == 0 {
-		return
-	}
-
-	bt.spanCount += newSpanCount
+func (bt *batchTraces) add(item chanItem) {
+	td := item.data.(ptrace.Traces)
+	bt.spanCount += td.SpanCount()
 	td.ResourceSpans().MoveAndAppendTo(bt.traceData.ResourceSpans())
 }
 
@@ -266,6 +308,7 @@ type batchMetrics struct {
 	metricData     pmetric.Metrics
 	dataPointCount int
 	sizer          pmetric.Sizer
+	waiters
 }
 
 func newBatchMetrics(nextConsumer consumer.Metrics) *batchMetrics {
@@ -296,14 +339,9 @@ func (bm *batchMetrics) itemCount() int {
 	return bm.dataPointCount
 }
 
-func (bm *batchMetrics) add(item any) {
-	md := item.(pmetric.Metrics)
-
-	newDataPointCount := md.DataPointCount()
-	if newDataPointCount == 0 {
-		return
-	}
-	bm.dataPointCount += newDataPointCount
+func (bm *batchMetrics) add(item chanItem) {
+	md := item.data.(pmetric.Metrics)
+	bm.dataPointCount += md.DataPointCount()
 	md.ResourceMetrics().MoveAndAppendTo(bm.metricData.ResourceMetrics())
 }
 
@@ -312,6 +350,7 @@ type batchLogs struct {
 	logData      plog.Logs
 	logCount     int
 	sizer        plog.Sizer
+	waiters
 }
 
 func newBatchLogs(nextConsumer consumer.Logs) *batchLogs {
@@ -342,13 +381,8 @@ func (bl *batchLogs) itemCount() int {
 	return bl.logCount
 }
 
-func (bl *batchLogs) add(item any) {
-	ld := item.(plog.Logs)
-
-	newLogsCount := ld.LogRecordCount()
-	if newLogsCount == 0 {
-		return
-	}
-	bl.logCount += newLogsCount
+func (bl *batchLogs) add(item chanItem) {
+	ld := item.data.(plog.Logs)
+	bl.logCount += ld.LogRecordCount()
 	ld.ResourceLogs().MoveAndAppendTo(bl.logData.ResourceLogs())
 }

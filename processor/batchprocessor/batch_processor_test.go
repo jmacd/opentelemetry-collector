@@ -420,7 +420,9 @@ func TestBatchMetrics_UnevenBatchMaxSize(t *testing.T) {
 	batchMetrics := newBatchMetrics(sink)
 	md := testdata.GenerateMetrics(metricsCount)
 
-	batchMetrics.add(md)
+	batchMetrics.add(chanItem{
+		data: md,
+	})
 	require.Equal(t, dataPointsPerMetric*metricsCount, batchMetrics.dataPointCount)
 	sent, _, sendErr := batchMetrics.export(ctx, sendBatchMaxSize, false)
 	require.NoError(t, sendErr)
