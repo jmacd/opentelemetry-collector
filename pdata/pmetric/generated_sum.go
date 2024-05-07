@@ -79,3 +79,9 @@ func (ms Sum) CopyTo(dest Sum) {
 	dest.SetIsMonotonic(ms.IsMonotonic())
 	ms.DataPoints().CopyTo(dest.DataPoints())
 }
+
+// ValidateUTF8 ensures all contents have a valid UTF8 encoding.
+func (ms Sum) ValidateUTF8(repl string) {
+
+	ms.DataPoints().ValidateUTF8(repl)
+}

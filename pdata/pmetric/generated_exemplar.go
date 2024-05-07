@@ -141,3 +141,17 @@ func (ms Exemplar) CopyTo(dest Exemplar) {
 	dest.SetTraceID(ms.TraceID())
 	dest.SetSpanID(ms.SpanID())
 }
+
+// ValidateUTF8 ensures all contents have a valid UTF8 encoding.
+func (ms Exemplar) ValidateUTF8(repl string) {
+
+	switch ms.ValueType() {
+	case ExemplarValueTypeDouble:
+		msgDoubleValue().ValidateUTF8(repl)
+	case ExemplarValueTypeInt:
+		msgIntValue().ValidateUTF8(repl)
+	}
+
+	ms.FilteredAttributes().ValidateUTF8(repl)
+
+}

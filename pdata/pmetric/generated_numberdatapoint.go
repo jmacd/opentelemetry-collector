@@ -143,3 +143,18 @@ func (ms NumberDataPoint) CopyTo(dest NumberDataPoint) {
 	ms.Exemplars().CopyTo(dest.Exemplars())
 	dest.SetFlags(ms.Flags())
 }
+
+// ValidateUTF8 ensures all contents have a valid UTF8 encoding.
+func (ms NumberDataPoint) ValidateUTF8(repl string) {
+	ms.Attributes().ValidateUTF8(repl)
+
+	switch ms.ValueType() {
+	case NumberDataPointValueTypeDouble:
+		msgDoubleValue().ValidateUTF8(repl)
+	case NumberDataPointValueTypeInt:
+		msgIntValue().ValidateUTF8(repl)
+	}
+
+	ms.Exemplars().ValidateUTF8(repl)
+
+}

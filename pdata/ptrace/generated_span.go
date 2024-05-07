@@ -7,6 +7,8 @@
 package ptrace
 
 import (
+	"strings"
+
 	"go.opentelemetry.io/collector/pdata/internal"
 	"go.opentelemetry.io/collector/pdata/internal/data"
 	otlptrace "go.opentelemetry.io/collector/pdata/internal/data/protogen/trace/v1"
@@ -213,4 +215,20 @@ func (ms Span) CopyTo(dest Span) {
 	ms.Links().CopyTo(dest.Links())
 	dest.SetDroppedLinksCount(ms.DroppedLinksCount())
 	ms.Status().CopyTo(dest.Status())
+}
+
+// ValidateUTF8 ensures all contents have a valid UTF8 encoding.
+func (ms Span) ValidateUTF8(repl string) {
+
+	ms.TraceState().ValidateUTF8(repl)
+
+	ms.orig.Name = strings.ToValidUTF8(ms.orig.Name, repl)
+
+	ms.Attributes().ValidateUTF8(repl)
+
+	ms.Events().ValidateUTF8(repl)
+
+	ms.Links().ValidateUTF8(repl)
+
+	ms.Status().ValidateUTF8(repl)
 }

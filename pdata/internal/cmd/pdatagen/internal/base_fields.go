@@ -152,6 +152,9 @@ func Test{{ .structName }}_CopyTo_{{ .fieldName }}(t *testing.T) {
 const copyToValueOneOfMessageTemplate = `	case {{ .typeName }}:
 		ms.{{ .fieldName }}().CopyTo(dest.SetEmpty{{ .fieldName }}())`
 
+const validateUTF8OneOfMessageTemplate = `	case {{ .typeName }}:
+		ms.{{ .fieldName }}().ValidateUTF8(repl)`
+
 const accessorsOneOfPrimitiveTemplate = `// {{ .accessorFieldName }} returns the {{ .lowerFieldName }} associated with this {{ .structName }}.
 func (ms {{ .structName }}) {{ .accessorFieldName }}() {{ .returnType }} {
 	return ms.orig.Get{{ .originFieldName }}()
@@ -251,6 +254,8 @@ type baseField interface {
 	GenerateSetWithTestValue(ms *messageValueStruct) string
 
 	GenerateCopyToValue(ms *messageValueStruct) string
+
+	GenerateValidateUTF8(ms *messageValueStruct) string
 }
 
 type sliceField struct {
@@ -287,6 +292,10 @@ func (sf *sliceField) GenerateSetWithTestValue(ms *messageValueStruct) string {
 
 func (sf *sliceField) GenerateCopyToValue(*messageValueStruct) string {
 	return "\tms." + sf.fieldName + "().CopyTo(dest." + sf.fieldName + "())"
+}
+
+func (sf *sliceField) GenerateValidateUTF8(*messageValueStruct) string {
+	return "\tms." + sf.fieldName + "().ValidateUTF8(repl)"
 }
 
 func (sf *sliceField) templateFields(ms *messageValueStruct) map[string]any {
@@ -345,6 +354,10 @@ func (mf *messageValueField) GenerateCopyToValue(*messageValueStruct) string {
 	return "\tms." + mf.fieldName + "().CopyTo(dest." + mf.fieldName + "())"
 }
 
+func (mf *messageValueField) GenerateValidateUTF8(*messageValueStruct) string {
+	return "\tms." + mf.fieldName + "().ValidateUTF8(repl)"
+}
+
 func (mf *messageValueField) templateFields(ms *messageValueStruct) map[string]any {
 	return map[string]any{
 		"isCommon":       usedByOtherDataTypes(mf.returnMessage.packageName),
@@ -396,6 +409,13 @@ func (pf *primitiveField) GenerateSetWithTestValue(*messageValueStruct) string {
 
 func (pf *primitiveField) GenerateCopyToValue(*messageValueStruct) string {
 	return "\tdest.Set" + pf.fieldName + "(ms." + pf.fieldName + "())"
+}
+
+func (pf *primitiveField) GenerateValidateUTF8(*messageValueStruct) string {
+	if pf.returnType == "string" {
+		return "\tms.orig." + pf.fieldName + " = strings.ToValidUTF8(ms.orig." + pf.fieldName + ", repl)"
+	}
+	return ""
 }
 
 func (pf *primitiveField) templateFields(ms *messageValueStruct) map[string]any {
@@ -460,6 +480,13 @@ func (ptf *primitiveTypedField) GenerateCopyToValue(*messageValueStruct) string 
 	return "\tdest.Set" + ptf.fieldName + "(ms." + ptf.fieldName + "())"
 }
 
+func (ptf *primitiveTypedField) GenerateValidateUTF8(*messageValueStruct) string {
+	if ptf.returnType.rawType == "string" {
+		return "\ttv.orig." + ptf.fieldName + ".ValidateUTF8(repl)"
+	}
+	return ""
+}
+
 func (ptf *primitiveTypedField) templateFields(ms *messageValueStruct) map[string]any {
 	return map[string]any{
 		"structName": ms.getName(),
@@ -520,6 +547,13 @@ func (psf *primitiveSliceField) GenerateSetWithTestValue(*messageValueStruct) st
 
 func (psf *primitiveSliceField) GenerateCopyToValue(*messageValueStruct) string {
 	return "\tms." + psf.fieldName + "().CopyTo(dest." + psf.fieldName + "())"
+}
+
+func (psf *primitiveSliceField) GenerateValidateUTF8(*messageValueStruct) string {
+	if psf.returnType == "string" {
+		return "\tms." + psf.fieldName + "().ValidateUTF8(repl)"
+	}
+	return ""
 }
 
 func (psf *primitiveSliceField) templateFields(ms *messageValueStruct) map[string]any {
@@ -591,6 +625,16 @@ func (of *oneOfField) GenerateCopyToValue(ms *messageValueStruct) string {
 	return sb.String()
 }
 
+func (of *oneOfField) GenerateValidateUTF8(ms *messageValueStruct) string {
+	sb := &bytes.Buffer{}
+	sb.WriteString("\tswitch ms." + of.typeFuncName() + "() {\n")
+	for _, v := range of.values {
+		v.GenerateValidateUTF8(ms, of, sb)
+	}
+	sb.WriteString("\t}\n")
+	return sb.String()
+}
+
 func (of *oneOfField) templateFields(ms *messageValueStruct) map[string]any {
 	return map[string]any{
 		"baseStruct":           ms,
@@ -614,6 +658,7 @@ type oneOfValue interface {
 	GenerateTests(ms *messageValueStruct, of *oneOfField) string
 	GenerateSetWithTestValue(ms *messageValueStruct, of *oneOfField) string
 	GenerateCopyToValue(ms *messageValueStruct, of *oneOfField, sb *bytes.Buffer)
+	GenerateValidateUTF8(ms *messageValueStruct, of *oneOfField, sb *bytes.Buffer)
 	GenerateTypeSwitchCase(ms *messageValueStruct, of *oneOfField) string
 }
 
@@ -659,6 +704,11 @@ func (opv *oneOfPrimitiveValue) GenerateSetWithTestValue(ms *messageValueStruct,
 func (opv *oneOfPrimitiveValue) GenerateCopyToValue(_ *messageValueStruct, of *oneOfField, sb *bytes.Buffer) {
 	sb.WriteString("\tcase " + of.typeName + opv.fieldName + ":\n")
 	sb.WriteString("\tdest.Set" + opv.accessorFieldName(of) + "(ms." + opv.accessorFieldName(of) + "())\n")
+}
+
+func (opv *oneOfPrimitiveValue) GenerateValidateUTF8(_ *messageValueStruct, of *oneOfField, sb *bytes.Buffer) {
+	sb.WriteString("\tcase " + of.typeName + opv.fieldName + ":\n")
+	sb.WriteString("\tmsg" + opv.accessorFieldName(of) + "().ValidateUTF8(repl)\n")
 }
 
 func (opv *oneOfPrimitiveValue) GenerateTypeSwitchCase(ms *messageValueStruct, of *oneOfField) string {
@@ -725,6 +775,14 @@ func (omv *oneOfMessageValue) GenerateCopyToValue(ms *messageValueStruct, of *on
 	sb.WriteString("\n")
 }
 
+func (omv *oneOfMessageValue) GenerateValidateUTF8(ms *messageValueStruct, of *oneOfField, sb *bytes.Buffer) {
+	t := template.Must(template.New("validateUTF8OneOfMessageTemplate").Parse(validateUTF8OneOfMessageTemplate))
+	if err := t.Execute(sb, omv.templateFields(ms, of)); err != nil {
+		panic(err)
+	}
+	sb.WriteString("\n")
+}
+
 func (omv *oneOfMessageValue) GenerateTypeSwitchCase(ms *messageValueStruct, of *oneOfField) string {
 	return "\tcase *" + ms.originFullName + "_" + omv.fieldName + ":\n" +
 		"\t\treturn " + of.typeName + omv.fieldName
@@ -781,6 +839,11 @@ func (opv *optionalPrimitiveValue) GenerateCopyToValue(*messageValueStruct) stri
 	return "if ms.Has" + opv.fieldName + "(){\n" +
 		"\tdest.Set" + opv.fieldName + "(ms." + opv.fieldName + "())\n" +
 		"}\n"
+}
+
+func (opv *optionalPrimitiveValue) GenerateValidateUTF8(*messageValueStruct) string {
+	return "if ms.Has" + opv.fieldName + "(){\n" +
+		"\tms." + opv.fieldName + "().ValidateUTF8(repl)\n}\n"
 }
 
 func (opv *optionalPrimitiveValue) templateFields(ms *messageValueStruct) map[string]any {

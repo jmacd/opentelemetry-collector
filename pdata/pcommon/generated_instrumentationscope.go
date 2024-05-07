@@ -7,6 +7,8 @@
 package pcommon
 
 import (
+	"strings"
+
 	"go.opentelemetry.io/collector/pdata/internal"
 	otlpcommon "go.opentelemetry.io/collector/pdata/internal/data/protogen/common/v1"
 )
@@ -95,4 +97,12 @@ func (ms InstrumentationScope) CopyTo(dest InstrumentationScope) {
 	dest.SetVersion(ms.Version())
 	ms.Attributes().CopyTo(dest.Attributes())
 	dest.SetDroppedAttributesCount(ms.DroppedAttributesCount())
+}
+
+// ValidateUTF8 ensures all contents have a valid UTF8 encoding.
+func (ms InstrumentationScope) ValidateUTF8(repl string) {
+	ms.orig.Name = strings.ToValidUTF8(ms.orig.Name, repl)
+	ms.orig.Version = strings.ToValidUTF8(ms.orig.Version, repl)
+	ms.Attributes().ValidateUTF8(repl)
+
 }

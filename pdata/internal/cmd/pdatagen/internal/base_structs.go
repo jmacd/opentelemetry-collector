@@ -71,6 +71,13 @@ func (ms {{ .structName }}) CopyTo(dest {{ .structName }}) {
 	{{- range .fields }}
 	{{ .GenerateCopyToValue $.messageStruct }}
 	{{- end }}
+}
+
+// ValidateUTF8 ensures all contents have a valid UTF8 encoding.
+func (ms {{ .structName}}) ValidateUTF8(repl string) {
+	{{- range .fields }}
+	{{ .GenerateValidateUTF8 $.messageStruct }}
+	{{- end }}
 }`
 
 const messageValueTestTemplate = `

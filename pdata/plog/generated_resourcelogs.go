@@ -7,6 +7,8 @@
 package plog
 
 import (
+	"strings"
+
 	"go.opentelemetry.io/collector/pdata/internal"
 	otlplogs "go.opentelemetry.io/collector/pdata/internal/data/protogen/logs/v1"
 	"go.opentelemetry.io/collector/pdata/pcommon"
@@ -73,4 +75,11 @@ func (ms ResourceLogs) CopyTo(dest ResourceLogs) {
 	ms.Resource().CopyTo(dest.Resource())
 	dest.SetSchemaUrl(ms.SchemaUrl())
 	ms.ScopeLogs().CopyTo(dest.ScopeLogs())
+}
+
+// ValidateUTF8 ensures all contents have a valid UTF8 encoding.
+func (ms ResourceLogs) ValidateUTF8(repl string) {
+	ms.Resource().ValidateUTF8(repl)
+	ms.orig.SchemaUrl = strings.ToValidUTF8(ms.orig.SchemaUrl, repl)
+	ms.ScopeLogs().ValidateUTF8(repl)
 }

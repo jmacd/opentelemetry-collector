@@ -7,6 +7,8 @@
 package pmetric
 
 import (
+	"strings"
+
 	"go.opentelemetry.io/collector/pdata/internal"
 	otlpmetrics "go.opentelemetry.io/collector/pdata/internal/data/protogen/metrics/v1"
 	"go.opentelemetry.io/collector/pdata/pcommon"
@@ -73,4 +75,11 @@ func (ms ResourceMetrics) CopyTo(dest ResourceMetrics) {
 	ms.Resource().CopyTo(dest.Resource())
 	dest.SetSchemaUrl(ms.SchemaUrl())
 	ms.ScopeMetrics().CopyTo(dest.ScopeMetrics())
+}
+
+// ValidateUTF8 ensures all contents have a valid UTF8 encoding.
+func (ms ResourceMetrics) ValidateUTF8(repl string) {
+	ms.Resource().ValidateUTF8(repl)
+	ms.orig.SchemaUrl = strings.ToValidUTF8(ms.orig.SchemaUrl, repl)
+	ms.ScopeMetrics().ValidateUTF8(repl)
 }

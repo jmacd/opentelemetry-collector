@@ -113,3 +113,12 @@ func (ms SpanLink) CopyTo(dest SpanLink) {
 	ms.Attributes().CopyTo(dest.Attributes())
 	dest.SetDroppedAttributesCount(ms.DroppedAttributesCount())
 }
+
+// ValidateUTF8 ensures all contents have a valid UTF8 encoding.
+func (ms SpanLink) ValidateUTF8(repl string) {
+
+	ms.TraceState().ValidateUTF8(repl)
+
+	ms.Attributes().ValidateUTF8(repl)
+
+}

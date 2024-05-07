@@ -242,3 +242,25 @@ func (ms ExponentialHistogramDataPoint) CopyTo(dest ExponentialHistogramDataPoin
 
 	dest.SetZeroThreshold(ms.ZeroThreshold())
 }
+
+// ValidateUTF8 ensures all contents have a valid UTF8 encoding.
+func (ms ExponentialHistogramDataPoint) ValidateUTF8(repl string) {
+	ms.Attributes().ValidateUTF8(repl)
+
+	ms.Positive().ValidateUTF8(repl)
+	ms.Negative().ValidateUTF8(repl)
+	ms.Exemplars().ValidateUTF8(repl)
+
+	if ms.HasSum() {
+		ms.Sum().ValidateUTF8(repl)
+	}
+
+	if ms.HasMin() {
+		ms.Min().ValidateUTF8(repl)
+	}
+
+	if ms.HasMax() {
+		ms.Max().ValidateUTF8(repl)
+	}
+
+}

@@ -68,3 +68,9 @@ func (ms ExponentialHistogram) CopyTo(dest ExponentialHistogram) {
 	dest.SetAggregationTemporality(ms.AggregationTemporality())
 	ms.DataPoints().CopyTo(dest.DataPoints())
 }
+
+// ValidateUTF8 ensures all contents have a valid UTF8 encoding.
+func (ms ExponentialHistogram) ValidateUTF8(repl string) {
+
+	ms.DataPoints().ValidateUTF8(repl)
+}

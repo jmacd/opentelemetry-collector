@@ -73,3 +73,8 @@ func (ms SummaryDataPointValueAtQuantile) CopyTo(dest SummaryDataPointValueAtQua
 	dest.SetQuantile(ms.Quantile())
 	dest.SetValue(ms.Value())
 }
+
+// ValidateUTF8 ensures all contents have a valid UTF8 encoding.
+func (ms SummaryDataPointValueAtQuantile) ValidateUTF8(repl string) {
+
+}

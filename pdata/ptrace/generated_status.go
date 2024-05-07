@@ -7,6 +7,8 @@
 package ptrace
 
 import (
+	"strings"
+
 	"go.opentelemetry.io/collector/pdata/internal"
 	otlptrace "go.opentelemetry.io/collector/pdata/internal/data/protogen/trace/v1"
 )
@@ -73,4 +75,10 @@ func (ms Status) CopyTo(dest Status) {
 	dest.state.AssertMutable()
 	dest.SetCode(ms.Code())
 	dest.SetMessage(ms.Message())
+}
+
+// ValidateUTF8 ensures all contents have a valid UTF8 encoding.
+func (ms Status) ValidateUTF8(repl string) {
+
+	ms.orig.Message = strings.ToValidUTF8(ms.orig.Message, repl)
 }

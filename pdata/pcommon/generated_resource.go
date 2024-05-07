@@ -72,3 +72,9 @@ func (ms Resource) CopyTo(dest Resource) {
 	ms.Attributes().CopyTo(dest.Attributes())
 	dest.SetDroppedAttributesCount(ms.DroppedAttributesCount())
 }
+
+// ValidateUTF8 ensures all contents have a valid UTF8 encoding.
+func (ms Resource) ValidateUTF8(repl string) {
+	ms.Attributes().ValidateUTF8(repl)
+
+}

@@ -7,6 +7,8 @@
 package pmetric
 
 import (
+	"strings"
+
 	"go.opentelemetry.io/collector/pdata/internal"
 	otlpmetrics "go.opentelemetry.io/collector/pdata/internal/data/protogen/metrics/v1"
 	"go.opentelemetry.io/collector/pdata/pcommon"
@@ -251,6 +253,27 @@ func (ms Metric) CopyTo(dest Metric) {
 		ms.ExponentialHistogram().CopyTo(dest.SetEmptyExponentialHistogram())
 	case MetricTypeSummary:
 		ms.Summary().CopyTo(dest.SetEmptySummary())
+	}
+
+}
+
+// ValidateUTF8 ensures all contents have a valid UTF8 encoding.
+func (ms Metric) ValidateUTF8(repl string) {
+	ms.orig.Name = strings.ToValidUTF8(ms.orig.Name, repl)
+	ms.orig.Description = strings.ToValidUTF8(ms.orig.Description, repl)
+	ms.orig.Unit = strings.ToValidUTF8(ms.orig.Unit, repl)
+	ms.Metadata().ValidateUTF8(repl)
+	switch ms.Type() {
+	case MetricTypeGauge:
+		ms.Gauge().ValidateUTF8(repl)
+	case MetricTypeSum:
+		ms.Sum().ValidateUTF8(repl)
+	case MetricTypeHistogram:
+		ms.Histogram().ValidateUTF8(repl)
+	case MetricTypeExponentialHistogram:
+		ms.ExponentialHistogram().ValidateUTF8(repl)
+	case MetricTypeSummary:
+		ms.Summary().ValidateUTF8(repl)
 	}
 
 }

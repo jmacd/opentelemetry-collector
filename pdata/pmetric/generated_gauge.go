@@ -55,3 +55,8 @@ func (ms Gauge) CopyTo(dest Gauge) {
 	dest.state.AssertMutable()
 	ms.DataPoints().CopyTo(dest.DataPoints())
 }
+
+// ValidateUTF8 ensures all contents have a valid UTF8 encoding.
+func (ms Gauge) ValidateUTF8(repl string) {
+	ms.DataPoints().ValidateUTF8(repl)
+}

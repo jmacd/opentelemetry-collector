@@ -55,3 +55,8 @@ func (ms Summary) CopyTo(dest Summary) {
 	dest.state.AssertMutable()
 	ms.DataPoints().CopyTo(dest.DataPoints())
 }
+
+// ValidateUTF8 ensures all contents have a valid UTF8 encoding.
+func (ms Summary) ValidateUTF8(repl string) {
+	ms.DataPoints().ValidateUTF8(repl)
+}

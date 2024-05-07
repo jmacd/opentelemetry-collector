@@ -122,3 +122,11 @@ func (ms SummaryDataPoint) CopyTo(dest SummaryDataPoint) {
 	ms.QuantileValues().CopyTo(dest.QuantileValues())
 	dest.SetFlags(ms.Flags())
 }
+
+// ValidateUTF8 ensures all contents have a valid UTF8 encoding.
+func (ms SummaryDataPoint) ValidateUTF8(repl string) {
+	ms.Attributes().ValidateUTF8(repl)
+
+	ms.QuantileValues().ValidateUTF8(repl)
+
+}

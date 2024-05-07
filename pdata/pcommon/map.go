@@ -252,6 +252,10 @@ func (m Map) CopyTo(dest Map) {
 	*dest.getOrig() = origs
 }
 
+func (m Map) ValidateUTF8(repl string) {
+	// @@@
+}
+
 // AsRaw returns a standard go map representation of this Map.
 func (m Map) AsRaw() map[string]any {
 	rawMap := make(map[string]any)

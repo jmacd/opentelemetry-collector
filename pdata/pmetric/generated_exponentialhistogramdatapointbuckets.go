@@ -68,3 +68,8 @@ func (ms ExponentialHistogramDataPointBuckets) CopyTo(dest ExponentialHistogramD
 	dest.SetOffset(ms.Offset())
 	ms.BucketCounts().CopyTo(dest.BucketCounts())
 }
+
+// ValidateUTF8 ensures all contents have a valid UTF8 encoding.
+func (ms ExponentialHistogramDataPointBuckets) ValidateUTF8(repl string) {
+
+}

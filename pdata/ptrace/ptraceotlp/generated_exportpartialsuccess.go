@@ -7,6 +7,8 @@
 package ptraceotlp
 
 import (
+	"strings"
+
 	"go.opentelemetry.io/collector/pdata/internal"
 	otlpcollectortrace "go.opentelemetry.io/collector/pdata/internal/data/protogen/collector/trace/v1"
 )
@@ -72,4 +74,10 @@ func (ms ExportPartialSuccess) CopyTo(dest ExportPartialSuccess) {
 	dest.state.AssertMutable()
 	dest.SetRejectedSpans(ms.RejectedSpans())
 	dest.SetErrorMessage(ms.ErrorMessage())
+}
+
+// ValidateUTF8 ensures all contents have a valid UTF8 encoding.
+func (ms ExportPartialSuccess) ValidateUTF8(repl string) {
+
+	ms.orig.ErrorMessage = strings.ToValidUTF8(ms.orig.ErrorMessage, repl)
 }
