@@ -453,12 +453,8 @@ func (b *shard) consumeAndWait(ctx context.Context, data any) error {
 		},
 	}
 
-	select {
-	case <-ctx.Done():
-		return ctx.Err()
-	case b.newItem <- item:
-		return nil
-	}
+	b.newItem <- item
+	return nil
 }
 
 // singleShardBatcher is used when metadataKeys is empty, to avoid the
