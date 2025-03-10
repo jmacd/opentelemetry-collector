@@ -4,9 +4,14 @@
 package main
 
 import (
+	"fmt"
 	"log"
+	"os"
+	"plugin"
+	"strings"
 
 	"go.opentelemetry.io/collector/component"
+	"go.opentelemetry.io/collector/processor"
 	"go.opentelemetry.io/collector/confmap"
 	envprovider "go.opentelemetry.io/collector/confmap/provider/envprovider"
 	fileprovider "go.opentelemetry.io/collector/confmap/provider/fileprovider"
@@ -23,9 +28,36 @@ func main() {
 		Version:     "0.121.0-dev",
 	}
 
+	// Get a list of .so files
+	args := strings.Split(os.Getenv("OTEL_COLLECTOR_SHARED_LIBRARY"), ",")
+	var dprocs []processor.Factory
+	for _, arg := range args {
+		if arg == "" {
+			continue
+		}
+		fmt.Println("WE are about to load this:", arg)
+		pg, err := plugin.Open(arg)
+		if err != nil {
+			// BAD
+			panic(err)
+		}
+		sym, err := pg.Lookup("NewFactory")
+		if err != nil {
+			// BAD
+			panic(err)
+		}
+		dprocs = append(dprocs, sym.(func() processor.Factory)())
+	}
+
+	staticComponents, saveErr := components(dprocs)
+
+	dynComps := func() (otelcol.Factories, error) {
+		return staticComponents, saveErr
+	}
+
 	set := otelcol.CollectorSettings{
 		BuildInfo: info,
-		Factories: components,
+		Factories: dynComps,
 		ConfigProviderSettings: otelcol.ConfigProviderSettings{
 			ResolverSettings: confmap.ResolverSettings{
 				ProviderFactories: []confmap.ProviderFactory{
