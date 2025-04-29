@@ -5,6 +5,7 @@ package metrics // import "go.opentelemetry.io/collector/receiver/otlpreceiver/i
 
 import (
 	"context"
+	"fmt"
 
 	"go.opentelemetry.io/collector/consumer"
 	"go.opentelemetry.io/collector/pdata/pmetric/pmetricotlp"
@@ -37,6 +38,8 @@ func (r *Receiver) Export(ctx context.Context, req pmetricotlp.ExportRequest) (p
 		return pmetricotlp.NewExportResponse(), nil
 	}
 
+	fmt.Println("SENDING METRICS EXPORT", md)
+
 	ctx = r.obsreport.StartMetricsOp(ctx)
 	err := r.nextConsumer.ConsumeMetrics(ctx, md)
 	r.obsreport.EndMetricsOp(ctx, dataFormatProtobuf, dataPointCount, err)
@@ -47,6 +50,8 @@ func (r *Receiver) Export(ctx context.Context, req pmetricotlp.ExportRequest) (p
 	// So, convert the error to appropriate grpc status and return the error
 	// NonPermanent errors will be converted to codes.Unavailable (equivalent to HTTP 503)
 	// Permanent errors will be converted to codes.InvalidArgument (equivalent to HTTP 400)
+	fmt.Println("METRICS EXPORT RESP:", err)
+
 	if err != nil {
 		return pmetricotlp.NewExportResponse(), errors.GetStatusFromError(err)
 	}

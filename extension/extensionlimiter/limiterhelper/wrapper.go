@@ -5,323 +5,160 @@ package limiterhelper // import "go.opentelemetry.io/collector/extension/extensi
 
 import (
 	"context"
+	"errors"
+	"slices"
 
 	"go.opentelemetry.io/collector/consumer"
-	"go.opentelemetry.io/collector/consumer/xconsumer"
 	"go.opentelemetry.io/collector/extension/extensionlimiter"
 	"go.opentelemetry.io/collector/pdata/plog"
 	"go.opentelemetry.io/collector/pdata/pmetric"
-	"go.opentelemetry.io/collector/pdata/pprofile"
 	"go.opentelemetry.io/collector/pdata/ptrace"
 )
 
-// Consumer is a builder for creating wrapped consumers with resource limiters
-//
-// This supports limiting by request_count, request_items, and
-// memory_size weight keys.
-//
-// The network_bytes weight key not supported because that information
-// is not available from the pdata object.
-type limiter struct {
-	requestItemsLimiter extensionlimiter.ResourceLimiter
-	memorySizeLimiter   extensionlimiter.ResourceLimiter
-	requestCountLimiter extensionlimiter.ResourceLimiter
+// Traits object interface is generalized by P the pipeline data type
+// (e.g., ptrace.Traces) and C the consumer type (e.g.,
+// consumer.Traces)
+type traits[P, C any] interface {
+	// itemCount is SpanCount(), DataPointCount(), or LogRecordCount().
+	itemCount(P) uint64
+	// memorySize uses the appropriate protobuf Sizer as a proxy
+	// for memory used.
+	memorySize(data P) uint64
+	// consume calls the appropriate consumer method (e.g., ConsumeTraces)
+	consume(ctx context.Context, data P, next C) error
+	// create is a functional constructor the consumer type (e.g., consumer.NewTraces)
+	create(func(ctx context.Context, data P) error, ...consumer.Option) (C, error)
 }
 
-// config stores configuration from Options.
-type config struct {
-	requestItemsLimiter bool
-	memorySizeLimiter   bool
-	requestCountLimiter bool
+// Traces traits
+
+type traceTraits struct{}
+
+func (traceTraits) itemCount(data ptrace.Traces) uint64 {
+	return uint64(data.SpanCount())
 }
 
-// Option represents the consumer options
-type Option interface {
-	apply(*config)
+func (traceTraits) memorySize(data ptrace.Traces) uint64 {
+	var sizer ptrace.MarshalSizer
+	return uint64(sizer.TracesSize(data))
 }
 
-type optionFunc func(*config)
-
-func (of optionFunc) apply(cfg *config) {
-	of(cfg)
+func (traceTraits) create(next func(ctx context.Context, data ptrace.Traces) error, opts ...consumer.Option) (consumer.Traces, error) {
+	return consumer.NewTraces(next, opts...)
 }
 
-// WithRequestCountLimit configures the consumer to limit based on request count.
-func WithRequestCountLimit() Option {
-	return optionFunc(func(c *config) {
-		c.requestCountLimiter = true
-	})
+func (traceTraits) consume(ctx context.Context, data ptrace.Traces, next consumer.Traces) error {
+	return next.ConsumeTraces(ctx, data)
 }
 
-// WithRequestItemsLimit configures the consumer to limit based on item counts.
-func WithRequestItemsLimit() Option {
-	return optionFunc(func(c *config) {
-		c.requestItemsLimiter = true
-	})
+// Logs traits
+
+type logTraits struct{}
+
+func (logTraits) itemCount(data plog.Logs) uint64 {
+	return uint64(data.LogRecordCount())
 }
 
-// WithMemorySizeLimit configures the consumer to limit based on memory size.
-func WithMemorySizeLimit() Option {
-	return optionFunc(func(c *config) {
-		c.memorySizeLimiter = true
-	})
+func (logTraits) memorySize(data plog.Logs) uint64 {
+	var sizer plog.MarshalSizer
+	return uint64(sizer.LogsSize(data))
 }
 
-func newLimiter(provider extensionlimiter.Provider, options ...Option) *limiter {
-	cfg := &config{}
-	for _, option := range options {
-		option.apply(cfg)
-	}
-	c := &limiter{}
-	if cfg.requestCountLimiter {
-		c.requestCountLimiter = provider.ResourceLimiter(extensionlimiter.WeightKeyRequestCount)
-	}
-	if cfg.requestItemsLimiter {
-		c.requestItemsLimiter = provider.ResourceLimiter(extensionlimiter.WeightKeyRequestItems)
-	}
-	if cfg.memorySizeLimiter {
-		c.memorySizeLimiter = provider.ResourceLimiter(extensionlimiter.WeightKeyMemorySize)
-	}
-	return c
+func (logTraits) create(next func(ctx context.Context, data plog.Logs) error, opts ...consumer.Option) (consumer.Logs, error) {
+	return consumer.NewLogs(next, opts...)
 }
 
-// WrapTraces wraps a traces consumer with resource limiters
-func WrapTraces(provider extensionlimiter.Provider, nextConsumer consumer.Traces, options ...Option) consumer.Traces {
-	limiter := newLimiter(provider, options...)
-
-	if limiter.requestItemsLimiter == nil && limiter.memorySizeLimiter == nil && limiter.requestCountLimiter == nil {
-		return nextConsumer
-	}
-	return &tracesConsumer{
-		nextConsumer: nextConsumer,
-		limiter:      limiter,
-	}
+func (logTraits) consume(ctx context.Context, data plog.Logs, next consumer.Logs) error {
+	return next.ConsumeLogs(ctx, data)
 }
 
-// WrapMetrics wraps a metrics consumer with resource limiters
-func WrapMetrics(provider extensionlimiter.Provider, nextConsumer consumer.Metrics, options ...Option) consumer.Metrics {
-	limiter := newLimiter(provider, options...)
+// Metrics traits
 
-	if limiter.requestItemsLimiter == nil && limiter.memorySizeLimiter == nil && limiter.requestCountLimiter == nil {
-		return nextConsumer
-	}
-	return &metricsConsumer{
-		nextConsumer: nextConsumer,
-		limiter:      limiter,
-	}
+type metricTraits struct{}
+
+func (metricTraits) itemCount(data pmetric.Metrics) uint64 {
+	return uint64(data.DataPointCount())
 }
 
-// WrapLogs wraps a logs consumer with resource limiters
-func WrapLogs(provider extensionlimiter.Provider, nextConsumer consumer.Logs, options ...Option) consumer.Logs {
-	limiter := newLimiter(provider, options...)
-	if limiter.requestItemsLimiter == nil && limiter.memorySizeLimiter == nil && limiter.requestCountLimiter == nil {
-		return nextConsumer
-	}
-	return &logsConsumer{
-		nextConsumer: nextConsumer,
-		limiter:      limiter,
-	}
+func (metricTraits) memorySize(data pmetric.Metrics) uint64 {
+	var sizer pmetric.MarshalSizer
+	return uint64(sizer.MetricsSize(data))
 }
 
-// WrapProfiles wraps a profiles consumer with resource limiters
-func WrapProfiles(provider extensionlimiter.Provider, nextConsumer xconsumer.Profiles, options ...Option) xconsumer.Profiles {
-	limiter := newLimiter(provider, options...)
-
-	if limiter.requestItemsLimiter == nil && limiter.memorySizeLimiter == nil && limiter.requestCountLimiter == nil {
-		return nextConsumer
-	}
-	return &profilesConsumer{
-		nextConsumer: nextConsumer,
-		limiter:      limiter,
-	}
+func (metricTraits) create(next func(ctx context.Context, data pmetric.Metrics) error, opts ...consumer.Option) (consumer.Metrics, error) {
+	return consumer.NewMetrics(next, opts...)
 }
 
-// Signal-specific consumer implementations
-type tracesConsumer struct {
-	nextConsumer consumer.Traces
-	*limiter
+func (metricTraits) consume(ctx context.Context, data pmetric.Metrics, next consumer.Metrics) error {
+	return next.ConsumeMetrics(ctx, data)
 }
 
-func (tc *tracesConsumer) Capabilities() consumer.Capabilities {
-	return tc.nextConsumer.Capabilities()
+// limitOne obtains a LimiterWrapper and applies a single weight limit.
+func limitOne[P any, C any](
+	next C,
+	keys []extensionlimiter.WeightKey,
+	provider extensionlimiter.LimiterWrapperProvider,
+	m traits[P, C],
+	key extensionlimiter.WeightKey,
+	opts []consumer.Option,
+	quantify func(P) uint64,
+) (C, error) {
+	if !slices.Contains(keys, key) {
+		return next, nil
+	}
+	lim, err := provider.LimiterWrapper(key)
+	if err != nil {
+		return next, err
+	}
+	if lim == nil {
+		return next, nil
+	}
+	return m.create(func(ctx context.Context, data P) error {
+		return lim.LimitCall(ctx, quantify(data), func(ctx context.Context) error {
+			return m.consume(ctx, data, next)
+		})
+	}, opts...)
 }
 
-func (tc *tracesConsumer) ConsumeTraces(ctx context.Context, td ptrace.Traces) error {
-	numSpans := td.SpanCount()
-	if numSpans == 0 {
-		return tc.nextConsumer.ConsumeTraces(ctx, td)
-	}
+// newLimited is signal-generic limiting logic.
+func newLimited[P any, C any](
+	next C,
+	keys []extensionlimiter.WeightKey,
+	provider extensionlimiter.LimiterWrapperProvider,
+	m traits[P, C],
+	opts ...consumer.Option) (C, error) {
+	var err1, err2, err3 error
+	// Note: reverse order of evaluation cost => least-cost applied first.
+	next, err1 = limitOne(next, keys, provider, m, extensionlimiter.WeightKeyMemorySize, opts,
 
-	// Apply the request count limiter if available
-	if tc.requestCountLimiter != nil {
-		release, err := tc.requestCountLimiter.Acquire(ctx, 1)
-		defer release()
-		if err != nil {
-			return err
-		}
-	}
-
-	// Apply the items limiter if available
-	if tc.requestItemsLimiter != nil {
-		release, err := tc.requestItemsLimiter.Acquire(ctx, uint64(numSpans))
-		defer release()
-		if err != nil {
-			return err
-		}
-	}
-
-	// Apply the memory size limiter if available
-	if tc.memorySizeLimiter != nil {
-		// Get the marshaled size of the request as a proxy for memory size
-		var sizer ptrace.ProtoMarshaler
-		size := sizer.TracesSize(td)
-		release, err := tc.memorySizeLimiter.Acquire(ctx, uint64(size))
-		defer release()
-		if err != nil {
-			return err
-		}
-	}
-
-	return tc.nextConsumer.ConsumeTraces(ctx, td)
+		func(data P) uint64 {
+			return m.memorySize(data)
+		})
+	next, err2 = limitOne(next, keys, provider, m, extensionlimiter.WeightKeyRequestItems, opts,
+		func(data P) uint64 {
+			return m.itemCount(data)
+		})
+	next, err3 = limitOne(next, keys, provider, m, extensionlimiter.WeightKeyRequestCount, opts,
+		func(_ P) uint64 {
+			return 1
+		})
+	return next, errors.Join(err1, err2, err3)
 }
 
-type metricsConsumer struct {
-	nextConsumer consumer.Metrics
-	*limiter
+// NewLimitedTraces applies a limiter using the provider over keys before calling next.
+func NewLimitedTraces(next consumer.Traces, keys []extensionlimiter.WeightKey, provider extensionlimiter.LimiterWrapperProvider) (consumer.Traces, error) {
+	return newLimited(next, keys, provider, traceTraits{},
+		consumer.WithCapabilities(next.Capabilities()))
 }
 
-func (mc *metricsConsumer) Capabilities() consumer.Capabilities {
-	return mc.nextConsumer.Capabilities()
+// NewLimitedLogs applies a limiter using the provider over keys before calling next.
+func NewLimitedLogs(next consumer.Logs, keys []extensionlimiter.WeightKey, provider extensionlimiter.LimiterWrapperProvider) (consumer.Logs, error) {
+	return newLimited(next, keys, provider, logTraits{},
+		consumer.WithCapabilities(next.Capabilities()))
 }
 
-func (mc *metricsConsumer) ConsumeMetrics(ctx context.Context, md pmetric.Metrics) error {
-	dataPointCount := md.DataPointCount()
-	if dataPointCount == 0 {
-		return mc.nextConsumer.ConsumeMetrics(ctx, md)
-	}
-
-	// Apply the request count limiter if available
-	if mc.requestCountLimiter != nil {
-		release, err := mc.requestCountLimiter.Acquire(ctx, 1)
-		defer release()
-		if err != nil {
-			return err
-		}
-	}
-
-	// Apply the items limiter if available
-	if mc.requestItemsLimiter != nil {
-		release, err := mc.requestItemsLimiter.Acquire(ctx, uint64(dataPointCount))
-		defer release()
-		if err != nil {
-			return err
-		}
-	}
-
-	// Apply the memory size limiter if available
-	if mc.memorySizeLimiter != nil {
-		var sizer pmetric.ProtoMarshaler
-		size := sizer.MetricsSize(md)
-		release, err := mc.memorySizeLimiter.Acquire(ctx, uint64(size))
-		defer release()
-		if err != nil {
-			return err
-		}
-	}
-
-	return mc.nextConsumer.ConsumeMetrics(ctx, md)
-}
-
-type logsConsumer struct {
-	nextConsumer consumer.Logs
-	*limiter
-}
-
-func (lc *logsConsumer) Capabilities() consumer.Capabilities {
-	return lc.nextConsumer.Capabilities()
-}
-
-func (lc *logsConsumer) ConsumeLogs(ctx context.Context, ld plog.Logs) error {
-	numRecords := ld.LogRecordCount()
-	if numRecords == 0 {
-		return lc.nextConsumer.ConsumeLogs(ctx, ld)
-	}
-
-	// Apply the request count limiter if available
-	if lc.requestCountLimiter != nil {
-		release, err := lc.requestCountLimiter.Acquire(ctx, 1)
-		defer release()
-		if err != nil {
-			return err
-		}
-	}
-
-	// Apply the items limiter if available
-	if lc.requestItemsLimiter != nil {
-		release, err := lc.requestItemsLimiter.Acquire(ctx, uint64(numRecords))
-		defer release()
-		if err != nil {
-			return err
-		}
-	}
-
-	// Apply the memory size limiter if available
-	if lc.memorySizeLimiter != nil {
-		var sizer plog.ProtoMarshaler
-		size := sizer.LogsSize(ld)
-		release, err := lc.memorySizeLimiter.Acquire(ctx, uint64(size))
-		defer release()
-		if err != nil {
-			return err
-		}
-	}
-
-	return lc.nextConsumer.ConsumeLogs(ctx, ld)
-}
-
-type profilesConsumer struct {
-	nextConsumer xconsumer.Profiles
-	*limiter
-}
-
-func (pc *profilesConsumer) ConsumeProfiles(ctx context.Context, pd pprofile.Profiles) error {
-	numProfiles := pd.SampleCount()
-	if numProfiles == 0 {
-		return pc.nextConsumer.ConsumeProfiles(ctx, pd)
-	}
-
-	// Apply the request count limiter if available
-	if pc.requestCountLimiter != nil {
-		release, err := pc.requestCountLimiter.Acquire(ctx, 1)
-		defer release()
-		if err != nil {
-			return err
-		}
-	}
-
-	// Apply the items limiter if available
-	if pc.requestItemsLimiter != nil {
-		release, err := pc.requestItemsLimiter.Acquire(ctx, uint64(numProfiles))
-		defer release()
-		if err != nil {
-			return err
-		}
-	}
-
-	// Apply the memory size limiter if available
-	if pc.memorySizeLimiter != nil {
-		var sizer pprofile.ProtoMarshaler
-		size := sizer.ProfilesSize(pd)
-		release, err := pc.memorySizeLimiter.Acquire(ctx, uint64(size))
-		defer release()
-		if err != nil {
-			return err
-		}
-	}
-
-	return pc.nextConsumer.ConsumeProfiles(ctx, pd)
-}
-
-func (pc *profilesConsumer) Capabilities() consumer.Capabilities {
-	return pc.nextConsumer.Capabilities()
+// NewLimitedMetrics applies a limiter using the provider over keys before calling next.
+func NewLimitedMetrics(next consumer.Metrics, keys []extensionlimiter.WeightKey, provider extensionlimiter.LimiterWrapperProvider) (consumer.Metrics, error) {
+	return newLimited(next, keys, provider, metricTraits{},
+		consumer.WithCapabilities(next.Capabilities()))
 }

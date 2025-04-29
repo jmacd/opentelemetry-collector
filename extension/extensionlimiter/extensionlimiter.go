@@ -3,16 +3,30 @@
 
 package extensionlimiter // import "go.opentelemetry.io/collector/extension/extensionlimiter"
 
-// RateLimiter and ResourceLimiter are alternatives.  A limiter
-// extension should implement one or the other, not both.  Users will
-// request an interface
+import "context"
+
+// LimiterWrapper is a general-purpose interface for callers wishing
+// to limit resources with simple scoping.
+type LimiterWrapper interface {
+	// @@@
+	MustDeny(context.Context) error
+
+	// @@@
+	LimitCall(context.Context, uint64, func(ctx context.Context) error) error
+}
 
 type RateLimiterProvider interface {
-	MiddlewareKeys() []WeightKey
-	GetRateLimiter(WeightKey) (RateLimiterProvider, RateLimiter, error)
+	RateLimiter(WeightKey) (RateLimiter, error)
 }
 
 type ResourceLimiterProvider interface {
-	MiddlewareKeys() []WeightKey
-	GetResourceLimiter(WeightKey) (ResourceLimiterProvider, ResourceLimiter, error)
+	ResourceLimiter(WeightKey) (ResourceLimiter, error)
 }
+
+type LimiterWrapperProvider interface {
+	LimiterWrapper(WeightKey) (LimiterWrapper, error)
+}
+
+// type RateLimiterProviderFunc func(WeightKey) (RateLimiter, error)
+
+// type ResourceLimiterProviderFunc func(WeightKey) (ResourceLimiter, error)
