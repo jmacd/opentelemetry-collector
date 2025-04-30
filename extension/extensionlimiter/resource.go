@@ -7,18 +7,35 @@ import (
 	"context"
 )
 
-// ResourceLimiter is an interface that components can use to apply
-// physical limits on quantities quantities such as the number of
-// concurrent requests or memory in use.
+// ResourceLimiterProvider is a provider for resource limiters.
 //
-// This is a relatively low-level interface, callers that can use
-// ResourceLimiterWrapper should do so.  This interfaceis meant for
-// use in cases where:
+// Limiter implementations will implement this or the
+// RateLimiterProvider interface, but MUST not implement both.
+// Limiters are covered by configmiddleware configuration, which
+// is able to construct LimiterWrappers from these providers.
+type ResourceLimiterProvider interface {
+	ResourceLimiter(WeightKey) (ResourceLimiter, error)
+}
+
+// ResourceLimiterProviderFunc is a functional way to build ResourceLimters.
+type ResourceLimiterProviderFunc func(WeightKey) (ResourceLimiter, error)
+
+var _ ResourceLimiterProvider = ResourceLimiterProviderFunc(nil)
+
+// ResourceLimiter implements ResourceLimiterProvider.
+func (f ResourceLimiterProviderFunc) ResourceLimiter(key WeightKey) (ResourceLimiter, error) {
+	return f(key)
+}
+
+// ResourceLimiter is an interface that an implementation makes
+// available to apply physical limits on quantities such as the number
+// of concurrent requests or amount of memory in use.
 //
-//   - the described resource has not yet been allocated; here the
-//     Acquire() prevents a resource from being over-consumed
-//   - the caller will return or continue with concurrent work before
-//     it is finished using the indicated resource.
+// This is a relatively low-level interface. Callers that can use a
+// LimiterWrapper should do so.  This interface is meant for direct
+// use only in special cases where control flow is not scoped to a
+// callback, for example in a streaming receiver where a limiter can
+// be Acquired in  Send() and released in after Recv().
 //
 // See the README for more recommendations.
 type ResourceLimiter interface {
@@ -31,24 +48,23 @@ type ResourceLimiter interface {
 	// depend on the value.
 	MustDeny(context.Context) error
 
-	// Acquire attempts to acquire a quantified resource based on
-	// the provided weight value. The caller has these options:
+	// Acquire attempts to acquire a quantified resource with the
+	// provided weight, based on the key that was given to the
+	// provider. The caller has these options:
 	//
 	// - Accept and let the request proceed by returning a release func and a nil error
 	// - Fail and return a non-nil error and a nil release func
 	// - Block until the resource becomes available, then accept
 	// - Block until the context times out, return the error.
 	//
-	// Note that callers may decide on these options using internal
-	// logic, and that all of these options may be good options.
 	// See the README for more recommendations.
-	//
-	// Implementations are not required to call a release func
-	// when Acquire(0) is called, because there is nothing to
-	// release. This is the equivalent of MustDeny().
 	//
 	// On success, it returns a ReleaseFunc that should be called
 	// when the resources are no longer needed.
+	//
+	// Implementations are not required to call a release func
+	// when Acquire(0) is called, because there is nothing to
+	// release. Acquire(0) the equivalent of MustDeny().
 	Acquire(ctx context.Context, value uint64) (ReleaseFunc, error)
 }
 
@@ -65,7 +81,6 @@ var _ ResourceLimiter = ResourceLimiterFunc(nil)
 
 // MustDeny implements ResourceLimiter
 func (f ResourceLimiterFunc) MustDeny(ctx context.Context) error {
-	// As defined, Acquire(0) callers can ignore the release func.
 	_, err := f.Acquire(ctx, 0)
 	return err
 }
@@ -89,11 +104,15 @@ type resourceLimiterWrapper struct {
 
 var _ LimiterWrapper = resourceLimiterWrapper{}
 
+// MustDeny implements LimiterWrapper.
 func (w resourceLimiterWrapper) MustDeny(ctx context.Context) error {
-
+	if w.limiter == nil {
+		return nil
+	}
 	return w.limiter.MustDeny(ctx)
 }
 
+// LimitCall implements LimiterWrapper.
 func (w resourceLimiterWrapper) LimitCall(ctx context.Context, value uint64, call func(context.Context) error) error {
 	if release, err := w.limiter.Acquire(ctx, value); err != nil {
 		return err

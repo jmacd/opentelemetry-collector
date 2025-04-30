@@ -3,112 +3,85 @@
 
 package limiterhelper // import "go.opentelemetry.io/collector/extension/extensionlimiter/limiterhelper"
 
-// import (
-// 	"context"
+import (
+	"context"
+	"errors"
+	"fmt"
 
-// 	"go.opentelemetry.io/collector/component"
-// 	"go.opentelemetry.io/collector/config/configmiddleware"
-// 	"go.opentelemetry.io/collector/extension/extensionlimiter"
-// )
+	"go.opentelemetry.io/collector/component"
+	"go.opentelemetry.io/collector/config/configmiddleware"
+	"go.opentelemetry.io/collector/extension/extensionlimiter"
+)
 
-// // MiddlewaresToLimiterProvider returns a multi-provider that combines all middleware limiter providers.
-// func MiddlewaresToLimiterProvider(host component.Host, middlewares []configmiddleware.Config) extensionlimiter.Provider {
-// 	var providers []extensionlimiter.Provider
-// 	exts := host.GetExtensions()
-// 	for _, middleware := range middlewares {
-// 		ext := exts[middleware.ID]
-// 		if ext == nil {
-// 			continue
-// 		}
-// 		if provider, ok := ext.(extensionlimiter.Provider); ok {
-// 			providers = append(providers, provider)
-// 		}
-// 	}
-// 	return NewMultiProvider(providers...)
-// }
+var (
+	ErrNotALimiter       = errors.New("middleware is not a limiter")
+	ErrLimiterConflict   = errors.New("limiter implements both rate and resource-limiters")
+	ErrUnresolvedLimiter = errors.New("could not resolve middleware limiter")
+)
 
-// // MultiProvider combines multiple Provider implementations into a single Provider.
-// // When requesting a limiter, it returns a combined limiter that applies all
-// // limits from the underlying providers.
-// type MultiProvider struct {
-// 	providers []extensionlimiter.Provider
-// }
+// MiddlewareToLimiterWrapperProvider returns a limiter wrapper
+// provider from middleware. Returns a package-level error if the
+// middleware does not implement exactly one of the limiter
+// interfaces (i.e., rate or resource).
+func MiddlewareToLimiterWrapperProvider(host component.Host, middleware configmiddleware.Config) (extensionlimiter.LimiterWrapperProvider, error) {
+	exts := host.GetExtensions()
+	ext := exts[middleware.ID]
+	if ext == nil {
+		return nil, fmt.Errorf("%w: %s", ErrUnresolvedLimiter, ext)
+	}
+	resourceLim, isResource := ext.(extensionlimiter.ResourceLimiterProvider)
+	rateLim, isRate := ext.(extensionlimiter.RateLimiterProvider)
 
-// // NewMultiProvider creates a new MultiProvider from the given providers.
-// func NewMultiProvider(providers ...extensionlimiter.Provider) *MultiProvider {
-// 	return &MultiProvider{providers: providers}
-// }
+	switch {
+	case isResource && isRate:
+		return nil, fmt.Errorf("%w: %s", ErrLimiterConflict, ext)
+	case isResource:
+		return extensionlimiter.NewResourceLimiterWrapperProvider(resourceLim), nil
+	case isRate:
+		return extensionlimiter.NewRateLimiterWrapperProvider(rateLim), nil
+	default:
+		return nil, fmt.Errorf("%w: %s", ErrNotALimiter, ext)
+	}
+}
 
-// // RateLimiter returns a combined RateLimiter for the specified weight key.
-// // The combined limiter will apply all limits from the underlying providers.
-// func (mp *MultiProvider) RateLimiter(key extensionlimiter.WeightKey) extensionlimiter.RateLimiter {
-// 	limiters := make([]extensionlimiter.RateLimiter, 0, len(mp.providers))
-// 	for _, p := range mp.providers {
-// 		if limiter := p.RateLimiter(key); limiter != nil {
-// 			limiters = append(limiters, limiter)
-// 		}
-// 	}
+// MultiLimiterWrapperProvider combines multiple limiter wrappers
+// providers into a single provider by sequencing wrapped limiters.
+// Returns errors from the underlying LimiterWrapper() calls, if any.
+type MultiLimiterWrapperProvider []extensionlimiter.LimiterWrapperProvider
 
-// 	if len(limiters) == 0 {
-// 		return nil
-// 	}
+var _ extensionlimiter.LimiterWrapperProvider = MultiLimiterWrapperProvider{}
 
-// 	return extensionlimiter.RateLimiterFunc(func(ctx context.Context, value uint64) error {
-// 		for _, limiter := range limiters {
-// 			if err := limiter.Limit(ctx, value); err != nil {
-// 				return err
-// 			}
-// 		}
-// 		return nil
-// 	})
-// }
+func (ps MultiLimiterWrapperProvider) LimiterWrapper(key extensionlimiter.WeightKey) (extensionlimiter.LimiterWrapper, error) {
+	if len(ps) == 0 {
+		return extensionlimiter.PassThrough, nil
+	}
 
-// // ResourceLimiter returns a combined ResourceLimiter for the specified weight key.
-// // The combined limiter will apply all limits from the underlying providers and
-// // aggregate the release functions.
-// func (mp *MultiProvider) ResourceLimiter(key extensionlimiter.WeightKey) extensionlimiter.ResourceLimiter {
-// 	limiters := make([]extensionlimiter.ResourceLimiter, 0, len(mp.providers))
-// 	for _, p := range mp.providers {
-// 		if limiter := p.ResourceLimiter(key); limiter != nil {
-// 			limiters = append(limiters, limiter)
-// 		}
-// 	}
+	// Map provider list to limiter list.
+	var lims []extensionlimiter.LimiterWrapper
 
-// 	if len(limiters) == 0 {
-// 		return nil
-// 	}
+	for _, provider := range ps {
+		lim, err := provider.LimiterWrapper(key)
+		if err == nil {
+			return nil, err
+		}
+		lims = append(lims, lim)
+	}
 
-// 	return extensionlimiter.ResourceLimiterFunc(func(ctx context.Context, value uint64) (extensionlimiter.ReleaseFunc, error) {
-// 		var funcs releaseFuncs
+	// Compose limiters in sequence.
+	return sequenceLimiters(lims), nil
+}
 
-// 		for _, limiter := range limiters {
-// 			releaseFunc, err := limiter.Acquire(ctx, value)
-// 			if err != nil {
-// 				// Release any already acquired resources
-// 				funcs.release()
-// 				return func() {}, err
-// 			}
-// 			if releaseFunc != nil {
-// 				funcs = append(funcs, releaseFunc)
-// 			}
-// 		}
+func sequenceLimiters(lims []extensionlimiter.LimiterWrapper) extensionlimiter.LimiterWrapper {
+	if len(lims) == 1 {
+		return lims[0]
+	}
+	return composeLimiters(lims[0], sequenceLimiters(lims[1:]))
+}
 
-// 		if len(funcs) == 0 {
-// 			return func() {}, nil
-// 		}
-
-// 		return funcs.release, nil
-// 	})
-// }
-
-// // releaseFuncs is a collection of release functions that can be called together
-// type releaseFuncs []extensionlimiter.ReleaseFunc
-
-// // release calls all non-nil release functions in the collection
-// func (r releaseFuncs) release() {
-// 	for _, rf := range r {
-// 		if rf != nil {
-// 			rf()
-// 		}
-// 	}
-// }
+func composeLimiters(first, second extensionlimiter.LimiterWrapper) extensionlimiter.LimiterWrapper {
+	return extensionlimiter.LimiterWrapperFunc(func(ctx context.Context, value uint64, call func(ctx context.Context) error) error {
+		return first.LimitCall(ctx, value, func(ctx context.Context) error {
+			return second.LimitCall(ctx, value, call)
+		})
+	})
+}
