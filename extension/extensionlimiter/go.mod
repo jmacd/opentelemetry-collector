@@ -6,9 +6,8 @@ require (
 	go.opentelemetry.io/collector/component v1.30.0
 	go.opentelemetry.io/collector/config/configmiddleware v0.0.0-00010101000000-000000000000
 	go.opentelemetry.io/collector/consumer v1.30.0
-	go.opentelemetry.io/collector/consumer/xconsumer v0.124.0
+	go.opentelemetry.io/collector/extension v1.30.0
 	go.opentelemetry.io/collector/pdata v1.30.0
-	go.opentelemetry.io/collector/pdata/pprofile v0.124.0
 )
 
 require (

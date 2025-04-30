@@ -32,10 +32,12 @@ func (f ResourceLimiterProviderFunc) ResourceLimiter(key WeightKey) (ResourceLim
 // of concurrent requests or amount of memory in use.
 //
 // This is a relatively low-level interface. Callers that can use a
-// LimiterWrapper should do so.  This interface is meant for direct
-// use only in special cases where control flow is not scoped to a
-// callback, for example in a streaming receiver where a limiter can
-// be Acquired in  Send() and released in after Recv().
+// LimiterWrapper should choose that interface instead.  This
+// interface is meant for direct use only in special cases where
+// control flow is not scoped to a callback, for example in a
+// streaming receiver where a limiter might be Acquired in the body of
+// Send() and released prior to a corresponding Recv() (e.g.,
+// OTel-Arrow receiver).
 //
 // See the README for more recommendations.
 type ResourceLimiter interface {

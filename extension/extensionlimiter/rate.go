@@ -10,9 +10,9 @@ import (
 // RateLimiterProvider is a provider for rate limiters.
 //
 // Limiter implementations will implement this or the
-// RateLimiterProvider interface, but MUST not implement both.
-// Limiters are covered by configmiddleware configuration, which
-// is able to construct LimiterWrappers from these providers.
+// ResourceLimiterProvider interface, but MUST not implement both.
+// Limiters are covered by configmiddleware configuration, which is
+// able to construct LimiterWrappers from these providers.
 type RateLimiterProvider interface {
 	RateLimiter(WeightKey) (RateLimiter, error)
 }
@@ -27,19 +27,15 @@ func (f RateLimiterProviderFunc) RateLimiter(key WeightKey) (RateLimiter, error)
 	return f(key)
 }
 
-// ResourceLimiter is an interface that an implementation makes
-// available to apply time-based limits on quantities such as the
-// number of bytes of arriving requests or number of items in outgoing
-// requests.
+// RateLimiter is an interface that an implementation makes available
+// to apply time-based limits on quantities such as the number of
+// bytes or items per second.
 //
 // This is a relatively low-level interface. Callers that can use a
-// LimiterWrapper should. This interface is meant for direct use only
-// in special cases where control flow cannot be easily scoped to a
-// callback, for example:
-//
-//   - in a streaming receiver where a limiter can be Acquired in
-//     Send() and released in after Recv()
-//   - inside middleware, in some cases (e.g., grpc.StatsHandler)
+// LimiterWrapper should choose that interface instead. This interface
+// is meant for direct use only in special cases where control flow
+// cannot be easily scoped to a callback, for example inside
+// middleware (e.g., grpc.StatsHandler).
 //
 // See the README for more recommendations.
 type RateLimiter interface {

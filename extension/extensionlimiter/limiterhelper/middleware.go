@@ -10,6 +10,7 @@ import (
 
 	"go.opentelemetry.io/collector/component"
 	"go.opentelemetry.io/collector/config/configmiddleware"
+	"go.opentelemetry.io/collector/extension"
 	"go.opentelemetry.io/collector/extension/extensionlimiter"
 )
 
@@ -19,28 +20,70 @@ var (
 	ErrUnresolvedLimiter = errors.New("could not resolve middleware limiter")
 )
 
+// MiddlewareIsLimiter returns true if a middleware configuration
+// represents a valid limiter, returns false for not found or invalid
+// cases. If the named extension is found but is not a limiter,
+// returns (false, nil).
+func MiddlewareIsLimiter(host component.Host, middleware configmiddleware.Config) (bool, error) {
+	_, ok, err := middlewareIsLimiter(host, middleware)
+	return ok, err
+}
+
+// MiddlewaresToLimiterWrapperProviders constructs a combined limiter
+// from an ordered list of middlewares. This constructor ignores
+// middleware configs that are not limiters.
+func MiddlewaresToLimiterWrapperProviders(host component.Host, middleware []configmiddleware.Config) (providers MultiLimiterWrapperProvider, retErr error) {
+	for _, mid := range middleware {
+		ok, err := MiddlewareIsLimiter(host, mid)
+		retErr = errors.Join(retErr, err)
+		if !ok {
+			continue
+		}
+		provider, err := MiddlewareToLimiterWrapperProvider(host, mid)
+		providers = append(providers, provider)
+		retErr = errors.Join(retErr, err)
+	}
+	return
+}
+
 // MiddlewareToLimiterWrapperProvider returns a limiter wrapper
 // provider from middleware. Returns a package-level error if the
 // middleware does not implement exactly one of the limiter
 // interfaces (i.e., rate or resource).
 func MiddlewareToLimiterWrapperProvider(host component.Host, middleware configmiddleware.Config) (extensionlimiter.LimiterWrapperProvider, error) {
+	ext, ok, err := middlewareIsLimiter(host, middleware)
+	if err != nil {
+		return nil, err
+	}
+	if ok {
+		if lim, ok := ext.(extensionlimiter.ResourceLimiterProvider); ok {
+			return extensionlimiter.NewResourceLimiterWrapperProvider(lim), nil
+		}
+		if lim, ok := ext.(extensionlimiter.RateLimiterProvider); ok {
+			return extensionlimiter.NewRateLimiterWrapperProvider(lim), nil
+		}
+	}
+	return nil, fmt.Errorf("%w: %s", ErrNotALimiter, ext)
+}
+
+// middlewareIsLimiter applies consistency checks and returns a valid
+// limiter extensions.
+func middlewareIsLimiter(host component.Host, middleware configmiddleware.Config) (extension.Extension, bool, error) {
 	exts := host.GetExtensions()
 	ext := exts[middleware.ID]
 	if ext == nil {
-		return nil, fmt.Errorf("%w: %s", ErrUnresolvedLimiter, ext)
+		return nil, false, fmt.Errorf("%w: %s", ErrUnresolvedLimiter, ext)
 	}
-	resourceLim, isResource := ext.(extensionlimiter.ResourceLimiterProvider)
-	rateLim, isRate := ext.(extensionlimiter.RateLimiterProvider)
+	_, isResource := ext.(extensionlimiter.ResourceLimiterProvider)
+	_, isRate := ext.(extensionlimiter.RateLimiterProvider)
 
 	switch {
 	case isResource && isRate:
-		return nil, fmt.Errorf("%w: %s", ErrLimiterConflict, ext)
-	case isResource:
-		return extensionlimiter.NewResourceLimiterWrapperProvider(resourceLim), nil
-	case isRate:
-		return extensionlimiter.NewRateLimiterWrapperProvider(rateLim), nil
+		return nil, false, fmt.Errorf("%w: %s", ErrLimiterConflict, ext)
+	case isResource, isRate:
+		return ext, true, nil
 	default:
-		return nil, fmt.Errorf("%w: %s", ErrNotALimiter, ext)
+		return nil, false, nil
 	}
 }
 

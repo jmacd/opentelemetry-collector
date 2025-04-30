@@ -98,7 +98,10 @@ func (r *otlpReceiver) startGRPCServer(host component.Host) error {
 		return err
 	}
 
-	limiterProvider := limiterhelper.MiddlewaresToLimiterProvider(host, r.cfg.GRPC.Middlewares)
+	var limiterProviders []extensionlimiter.LimiterWrapperProvider
+	for 
+	
+	//:= limiterhelper.MiddlewaresToLimiterProvider(host, r.cfg.GRPC.Middlewares)
 	helperOptions := []limiterhelper.Option{
 		limiterhelper.WithRequestItemsLimit(),
 		limiterhelper.WithMemorySizeLimit(),
