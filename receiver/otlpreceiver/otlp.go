@@ -99,13 +99,14 @@ func (r *otlpReceiver) startGRPCServer(host component.Host) error {
 		return err
 	}
 
+	limitKeys := extensionlimiter.StandardNotMiddlewareKeys()
 	limiterProvider, err := limiterhelper.MiddlewaresToLimiterWrapperProvider(host, r.cfg.GRPC.Middlewares)
 	if err != nil {
 		return err
 	}
 
 	if r.nextTraces != nil {
-		next, err := limiterhelper.NewLimitedTraces(r.nextTraces, extensionlimiter.StandardNotMiddlewareKeys(), limiterProvider)
+		next, err := limiterhelper.NewLimitedTraces(r.nextTraces, limitKeys, limiterProvider)
 		if err != nil {
 			return err
 		}
@@ -113,7 +114,7 @@ func (r *otlpReceiver) startGRPCServer(host component.Host) error {
 	}
 
 	if r.nextMetrics != nil {
-		next, err := limiterhelper.NewLimitedMetrics(r.nextMetrics, extensionlimiter.StandardNotMiddlewareKeys(), limiterProvider)
+		next, err := limiterhelper.NewLimitedMetrics(r.nextMetrics, limitKeys, limiterProvider)
 		if err != nil {
 			return err
 		}
@@ -121,7 +122,7 @@ func (r *otlpReceiver) startGRPCServer(host component.Host) error {
 	}
 
 	if r.nextLogs != nil {
-		next, err := limiterhelper.NewLimitedLogs(r.nextLogs, extensionlimiter.StandardNotMiddlewareKeys(), limiterProvider)
+		next, err := limiterhelper.NewLimitedLogs(r.nextLogs, limitKeys, limiterProvider)
 		if err != nil {
 			return err
 		}
@@ -129,7 +130,7 @@ func (r *otlpReceiver) startGRPCServer(host component.Host) error {
 	}
 
 	if r.nextProfiles != nil {
-		next, err := limiterhelper.NewLimitedProfiles(r.nextProfiles, extensionlimiter.StandardNotMiddlewareKeys(), limiterProvider)
+		next, err := limiterhelper.NewLimitedProfiles(r.nextProfiles, limitKeys, limiterProvider)
 		if err != nil {
 			return err
 		}
@@ -159,6 +160,7 @@ func (r *otlpReceiver) startHTTPServer(ctx context.Context, host component.Host)
 		return nil
 	}
 
+	limitKeys := extensionlimiter.StandardNotMiddlewareKeys()
 	limiterProvider, err := limiterhelper.MiddlewaresToLimiterWrapperProvider(host, r.cfg.HTTP.ServerConfig.Middlewares)
 	if err != nil {
 		return err
@@ -166,7 +168,7 @@ func (r *otlpReceiver) startHTTPServer(ctx context.Context, host component.Host)
 
 	httpMux := http.NewServeMux()
 	if r.nextTraces != nil {
-		next, err := limiterhelper.NewLimitedTraces(r.nextTraces, extensionlimiter.StandardNotMiddlewareKeys(), limiterProvider)
+		next, err := limiterhelper.NewLimitedTraces(r.nextTraces, limitKeys, limiterProvider)
 		if err != nil {
 			return err
 		}
@@ -177,7 +179,7 @@ func (r *otlpReceiver) startHTTPServer(ctx context.Context, host component.Host)
 	}
 
 	if r.nextMetrics != nil {
-		_, err := limiterhelper.NewLimitedMetrics(r.nextMetrics, extensionlimiter.StandardNotMiddlewareKeys(), limiterProvider)
+		_, err := limiterhelper.NewLimitedMetrics(r.nextMetrics, limitKeys, limiterProvider)
 		if err != nil {
 			return err
 		}
@@ -188,7 +190,7 @@ func (r *otlpReceiver) startHTTPServer(ctx context.Context, host component.Host)
 	}
 
 	if r.nextLogs != nil {
-		next, err := limiterhelper.NewLimitedLogs(r.nextLogs, extensionlimiter.StandardNotMiddlewareKeys(), limiterProvider)
+		next, err := limiterhelper.NewLimitedLogs(r.nextLogs, limitKeys, limiterProvider)
 		if err != nil {
 			return err
 		}
@@ -199,7 +201,7 @@ func (r *otlpReceiver) startHTTPServer(ctx context.Context, host component.Host)
 	}
 
 	if r.nextProfiles != nil {
-		next, err := limiterhelper.NewLimitedProfiles(r.nextProfiles, extensionlimiter.StandardNotMiddlewareKeys(), limiterProvider)
+		next, err := limiterhelper.NewLimitedProfiles(r.nextProfiles, limitKeys, limiterProvider)
 		if err != nil {
 			return err
 		}

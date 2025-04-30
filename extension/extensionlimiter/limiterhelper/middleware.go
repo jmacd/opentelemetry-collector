@@ -32,7 +32,9 @@ func MiddlewareIsLimiter(host component.Host, middleware configmiddleware.Config
 // MiddlewaresToLimiterWrapperProvider constructs a combined limiter
 // from an ordered list of middlewares. This constructor ignores
 // middleware configs that are not limiters.
-func MiddlewaresToLimiterWrapperProvider(host component.Host, middleware []configmiddleware.Config) (providers MultiLimiterWrapperProvider, retErr error) {
+func MiddlewaresToLimiterWrapperProvider(host component.Host, middleware []configmiddleware.Config) (extensionlimiter.LimiterWrapperProvider, error) {
+	var retErr error
+	var providers []extensionlimiter.LimiterWrapperProvider
 	for _, mid := range middleware {
 		ok, err := MiddlewareIsLimiter(host, mid)
 		retErr = errors.Join(retErr, err)
@@ -43,7 +45,10 @@ func MiddlewaresToLimiterWrapperProvider(host component.Host, middleware []confi
 		providers = append(providers, provider)
 		retErr = errors.Join(retErr, err)
 	}
-	return
+	if len(providers) == 0 {
+		return nil, nil
+	}
+	return MultiLimiterWrapperProvider(providers), nil
 }
 
 // MiddlewareToLimiterWrapperProvider returns a limiter wrapper
@@ -97,7 +102,6 @@ var _ extensionlimiter.LimiterWrapperProvider = MultiLimiterWrapperProvider{}
 // LimiterWrapper implements LimiterWrapperProvider.
 func (ps MultiLimiterWrapperProvider) LimiterWrapper(key extensionlimiter.WeightKey) (extensionlimiter.LimiterWrapper, error) {
 	if len(ps) == 0 {
-		fmt.Println("THIS CASE")
 		return extensionlimiter.PassThrough(), nil
 	}
 

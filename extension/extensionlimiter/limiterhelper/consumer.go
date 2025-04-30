@@ -6,7 +6,6 @@ package limiterhelper // import "go.opentelemetry.io/collector/extension/extensi
 import (
 	"context"
 	"errors"
-	"fmt"
 	"slices"
 
 	"go.opentelemetry.io/collector/consumer"
@@ -47,7 +46,6 @@ func (traceTraits) memorySize(data ptrace.Traces) uint64 {
 }
 
 func (traceTraits) create(next func(ctx context.Context, data ptrace.Traces) error, opts ...consumer.Option) (consumer.Traces, error) {
-	fmt.Println("C TRACES")
 	return consumer.NewTraces(next, opts...)
 }
 
@@ -69,7 +67,6 @@ func (metricTraits) memorySize(data pmetric.Metrics) uint64 {
 }
 
 func (metricTraits) create(next func(ctx context.Context, data pmetric.Metrics) error, opts ...consumer.Option) (consumer.Metrics, error) {
-	fmt.Println("C METRICS")
 	return consumer.NewMetrics(next, opts...)
 }
 
@@ -91,7 +88,6 @@ func (logTraits) memorySize(data plog.Logs) uint64 {
 }
 
 func (logTraits) create(next func(ctx context.Context, data plog.Logs) error, opts ...consumer.Option) (consumer.Logs, error) {
-	fmt.Println("C LOGS")
 	return consumer.NewLogs(next, opts...)
 }
 
@@ -135,25 +131,17 @@ func limitOne[P any, C any](
 	}
 	lim, err := provider.LimiterWrapper(key)
 	if err != nil {
-		fmt.Println("AYEEEI!!!")
 		return next, err
 	}
 	if lim == nil {
-		fmt.Println("RNEXT")
 		return next, nil
 	}
-	r, x := m.create(func(ctx context.Context, data P) error {
-		x := lim.LimitCall(ctx, quantify(data), func(ctx context.Context) error {
-			x := m.consume(ctx, data, next)
-			fmt.Println("INSIDE", x)
-			return x
+	return m.create(func(ctx context.Context, data P) error {
+		return lim.LimitCall(ctx, quantify(data), func(ctx context.Context) error {
+			return m.consume(ctx, data, next)
 		})
-		fmt.Println("MIDDLE", x)
-		return x
 
 	}, opts...)
-	fmt.Println("OUTSIDE", r, x)
-	return r, x
 }
 
 // newLimited is signal-generic limiting logic.
@@ -181,7 +169,6 @@ func newLimited[P any, C any](
 		func(_ P) uint64 {
 			return 1
 		})
-	fmt.Println("EH?", err1, err2, err3)
 	return next, errors.Join(err1, err2, err3)
 }
 
