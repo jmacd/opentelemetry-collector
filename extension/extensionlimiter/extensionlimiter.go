@@ -3,7 +3,9 @@
 
 package extensionlimiter // import "go.opentelemetry.io/collector/extension/extensionlimiter"
 
-import "context"
+import (
+	"context"
+)
 
 // LimiterWrapper is a general-purpose interface for limiter consumers
 // to limit resources with use of a callback.  This is the simplest
@@ -55,17 +57,16 @@ func (f LimiterWrapperFunc) MustDeny(ctx context.Context) error {
 
 // LimitCall implements LimiterWrapper.
 func (f LimiterWrapperFunc) LimitCall(ctx context.Context, value uint64, call func(ctx context.Context) error) error {
-	return f.LimitCall(ctx, value, call)
+	if f == nil {
+		return call(ctx)
+	}
+	return f(ctx, value, call)
 }
 
-// PassThrough is a LimiterWrapper that imposes no limit.
-// Reviewer: Would you prefer a "NopLimiterWrapper" implementation
-// instead?  Since "Nop" is typical for a test package, I'm
-// unsure. (See use in limiterhelper/multi.go).
-var PassThrough = LimiterWrapperFunc(
-	func(ctx context.Context, _ uint64, call func(ctx context.Context) error) error {
-		return call(ctx)
-	})
+// PassThrough returns a LimiterWrapper that imposes no limit.
+func PassThrough() LimiterWrapper {
+	return LimiterWrapperFunc(nil)
+}
 
 // LimiterWrapperProviderFunc is a functional way to build LimiterWrappers.
 type LimiterWrapperProviderFunc func(WeightKey) (LimiterWrapper, error)
