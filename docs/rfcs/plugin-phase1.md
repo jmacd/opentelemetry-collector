@@ -114,17 +114,16 @@ For complex Cargo dependency specifications, YAML provides multiple quoting opti
 - Backward compatibility preservation
 
 ### What's Deferred to Later Phases
-- Rust component configuration objects and patterns
-- Cargo.toml template generation
-- Rust build process integration  
-- Component factory registration for Rust components
-- FFI bridge code generation
+- **Phase 2: Runtime Configuration Design** - serde-based configuration structs, confmap integration, FFI validation
+- **Phase 3: Build Process Integration** - Cargo.toml template generation, Rust compilation workflow
+- **Phase 4: Component Factories** - Factory registration for Rust components  
+- **Phase 5: rust2go Integration** - FFI bridge code generation, runtime data processing
 - Distribution struct enhancements for Rust toolchain
 - Cargo patches (equivalent to Go replaces/excludes)
 
 ## Configuration Strategy
 
-Phase 1 deliberately avoids addressing how Rust components will be configured at runtime. For initial implementation, Rust components will use empty configuration objects, allowing the builder and factory infrastructure to be established before tackling the more complex configuration design challenges.
+Phase 1 deliberately avoids addressing how Rust components will be configured at runtime. For initial implementation, Rust components will use empty configuration objects, allowing the builder and factory infrastructure to be established. **Phase 2 will focus specifically on the configuration design challenges**, including serde-based configuration structs and confmap integration.
 
 ## Compatibility Impact
 
@@ -142,12 +141,11 @@ Phase 1 deliberately avoids addressing how Rust components will be configured at
 
 Phase 1 establishes the configuration foundation. Subsequent phases will need to address:
 
-1. **Build Process Integration**: Cargo.toml generation and Rust compilation
-2. **Component Registration**: Factory patterns for Rust components
-3. **FFI Integration**: Go↔️Rust interoperability using rust2go framework
-4. **Template System**: Cargo.toml.tmpl and related build artifacts
+1. **Phase 2: Runtime Configuration Design**: serde-based configuration structs, confmap integration, FFI validation
+2. **Phase 3: Build Process Integration**: Cargo.toml generation and Rust compilation
+3. **Phase 4: Component Registration**: Factory patterns for Rust components
+4. **Phase 5: rust2go Integration**: Go↔️Rust interoperability and runtime data processing
 5. **Toolchain Management**: Rust version specification in Distribution struct
-6. **Configuration Design**: How Rust components receive and validate configuration
 
 ## Files Modified
 
