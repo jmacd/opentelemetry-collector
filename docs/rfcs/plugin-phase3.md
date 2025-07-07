@@ -16,363 +16,83 @@ Phase 3 implements the Go mechanics for extension component lifecycle using rust
 
 ### Extension Factory Implementation
 
-Phase 3 implements the complete `extension.Factory` interface, demonstrating the factory pattern that will be extended in Phase 4 for pipeline components. The factory serves as the bridge between Go's component system and Rust's linkme-based static registration.
+Phase 3 implements the complete `extension.Factory` interface, using the factory pattern that will be extended in Phase 4 for pipeline components. The factory bridges Go's component system and Rust's static registration.
 
-**Factory Interface Implementation**:
-```go
-// Factory implements extension.Factory with complete component.Factory interface
-type Factory struct {
-    componentType component.Type        // Returned by Type()
-    stability     component.StabilityLevel
-    logger        *zap.Logger
-}
-
-// Type() returns the component type for registration in generated components.go
-func (f *Factory) Type() component.Type {
-    return f.componentType
-}
-
-// CreateDefaultConfig() uses Phase 2 patterns to get default from Rust
-func (f *Factory) CreateDefaultConfig() component.Config {
-    jsonPtr := C.rust_extension_default_config()
-    defer C.free_rust_string(jsonPtr)
-    
-    jsonStr := C.GoString(jsonPtr)
-    return &RustComponentConfig{rawJSON: jsonStr}  // Phase 2 config wrapper
-}
-
-// Create() implements the factory creation pattern - no Rust instance yet
-func (f *Factory) Create(ctx context.Context, set extension.Settings, cfg component.Config) (extension.Extension, error) {
-    rustCfg, ok := cfg.(*RustComponentConfig)
-    if !ok {
-        return nil, fmt.Errorf("invalid config type")
-    }
-    
-    // Only create Go wrapper - Rust component instance created during Start()
-    return &rustExtension{
-        id:        set.ID,
-        config:    rustCfg,  // Config already validated by confmap during RustComponentConfig.Unmarshal()
-        started:   false,
-        rustHandle: nil,
-    }, nil
-}
-```
+**Key points:**
+- Implements the `extension.Factory` interface.
+- Returns the component type for registration.
+- Uses Rust FFI to get the default config (Phase 2 pattern).
+- Creates Go wrapper components with validated configuration; Rust instance is created later during Start.
 
 ### Rust Factory Registration (linkme)
 
-Rust components use `linkme` for static registration, complementing Go's manual registration:
+Rust components use `linkme` for static registration, complementing Go's manual registration.
 
-```rust
-use linkme::distributed_slice;
-
-// Distributed slice for extension factory registration at link time
-#[distributed_slice]
-pub static RUST_EXTENSIONS: [&'static dyn ExtensionFactory] = [..];
-
-// Factory trait for extensions
-pub trait ExtensionFactory: Send + Sync {
-    fn component_type(&self) -> &'static str;
-    fn create_default_config(&self) -> String;
-    fn validate_config(&self, config_json: &str) -> Result<(), String>;
-    fn create_instance(&self, config: &str) -> Result<Box<dyn ExtensionLifecycle>, String>;
-}
-
-// Static registration using linkme
-#[distributed_slice(RUST_EXTENSIONS)]
-static SAMPLE_EXTENSION_FACTORY: &'static dyn ExtensionFactory = &SampleExtensionFactory;
-
-pub struct SampleExtensionFactory;
-
-impl ExtensionFactory for SampleExtensionFactory {
-    fn component_type(&self) -> &'static str {
-        "rust_sample"
-    }
-    
-    fn create_default_config(&self) -> String {
-        let config = ExtensionConfig::default();
-        serde_json::to_string(&config).unwrap_or_else(|_| "{}".to_string())
-    }
-    
-    fn validate_config(&self, config_json: &str) -> Result<(), String> {
-        let config: ExtensionConfig = serde_json::from_str(config_json)
-            .map_err(|e| format!("serde parse error: {}", e))?;
-        config.validate()
-    }
-    
-    fn create_instance(&self, config: &str) -> Result<Box<dyn ExtensionLifecycle>, String> {
-        let config: ExtensionConfig = serde_json::from_str(config)?;
-        Ok(Box::new(SampleExtension::new(config)))
-    }
-}
-```
+**Key points:**
+- Uses distributed slices for extension factory registration at link time
+- Defines a factory trait for extensions, with methods for type, default config, validation, and instance creation
+- Registers factories statically using linkme
+- Each factory provides type information, default config, validation, and instance creation logic
 
 ### Factory Discovery and Integration
 
-The factory system provides a bridge between Go's explicit registration and Rust's static registration:
+The factory system bridges Go's explicit registration and Rust's static registration.
 
-1. **Builder Phase (Phase 1)**: `cargo` fields identify Rust extensions for factory generation
-2. **Configuration Phase (Phase 2)**: Factory `CreateDefaultConfig()` returns `RustComponentConfig` wrappers
-3. **Runtime Phase (Phase 3)**: Factory `Create()` builds Go wrappers, `Start()` creates Rust instances via rust2go
-4. **Pipeline Phase (Phase 4)**: Same pattern extends to processor/exporter/receiver factories
+**Key points:**
+- Builder phase: `cargo` fields identify Rust extensions for factory generation
+- Configuration phase: Factory `CreateDefaultConfig()` returns `RustComponentConfig` wrappers
+- Runtime phase: Factory `Create()` builds Go wrappers, `Start()` creates Rust instances via rust2go
+- Pipeline phase: Same pattern extends to processor/exporter/receiver factories
 
 ## Component Lifecycle Separation
 
-### Step 1: Component Creation (Build Time)
-- **When**: During collector startup, when building component graph
-- **Purpose**: Instantiate Go wrapper components and validate all configurations  
-- **Rust Interaction**: Only configuration validation (from Phase 2)
-- **No Rust Component Instance**: Go wrapper created, Rust component instance deferred
+Component lifecycle is separated into two phases:
 
-### Step 2: Component Activation (Runtime)
-- **When**: After all components created, during ordered startup
-- **Purpose**: Create and start Rust component instances with validated configs
-- **Rust Interaction**: rust2go create_and_start() call
-- **State Management**: Rust handle stored for later shutdown
+**Step 1: Component Creation (Build Time)**
+- During collector startup, when building the component graph
+- Instantiates Go wrapper components and validates all configurations
+- Only configuration validation occurs on the Rust side (from Phase 2)
+- No Rust component instance is created yet; only the Go wrapper exists
+
+**Step 2: Component Activation (Runtime)**
+- After all components are created, during ordered startup
+- Creates and starts Rust component instances with validated configs
+- Calls rust2go create_and_start() for Rust interaction
+- Rust handle is stored for later shutdown
 
 ## Core Architecture
 
 ### Go Extension Factory Implementation
+The Go extension factory is responsible for:
 
-````go
-package rustextension
+- Implementing the `extension.Factory` interface
+- Returning the component type for registration
+- Using Rust FFI to get the default config (from Phase 2)
+- Creating Go wrapper components with validated configuration (Rust instance is created later during Start)
+- Logging creation events for observability
 
-import (
-    "context"
-    "encoding/json"
-    "fmt"
-    "unsafe"
-    
-    "go.opentelemetry.io/collector/component"
-    "go.opentelemetry.io/collector/extension"
-    "go.opentelemetry.io/collector/confmap"
-    "go.uber.org/zap"
-)
-
-/*
-#include "rust_extension.h"
-*/
-import "C"
-
-// Factory implements extension.Factory
-type Factory struct {
-    componentType component.Type
-    stability     component.StabilityLevel
-    logger        *zap.Logger
-}
-
-// NewFactory creates a new rust extension factory
-func NewFactory() extension.Factory {
-    return &Factory{
-        componentType: component.MustNewType("rust_sample"),
-        stability:     component.StabilityLevelDevelopment,
-        logger:        zap.NewNop(), // Will be set by collector
-    }
-}
-
-// Type returns the component type
-func (f *Factory) Type() component.Type {
-    return f.componentType
-}
-
-// Stability returns the stability level
-func (f *Factory) Stability() component.StabilityLevel {
-    return f.stability
-}
-
-// CreateDefaultConfig creates the default configuration
-func (f *Factory) CreateDefaultConfig() component.Config {
-    // Call Rust to get default config JSON (from Phase 2)
-    jsonPtr := C.rust_extension_default_config()
-    defer C.free_rust_string(jsonPtr)
-    
-    if jsonPtr == nil {
-        // Fallback default
-        return &RustComponentConfig{rawJSON: "{}"}
-    }
-    
-    jsonStr := C.GoString(jsonPtr)
-    return &RustComponentConfig{rawJSON: jsonStr}
-}
-
-// Create creates the extension wrapper - NO Rust component instance yet
-func (f *Factory) Create(
-    ctx context.Context, 
-    set extension.Settings, 
-    cfg component.Config,
-) (extension.Extension, error) {
-    rustCfg, ok := cfg.(*RustComponentConfig)
-    if !ok {
-        return nil, fmt.Errorf("invalid config type for rust extension, expected *RustComponentConfig, got %T", cfg)
-    }
-    
-    // Config is already validated by confmap.Unmarshal during RustComponentConfig.Unmarshal()
-    // This step is ONLY about creating the Go wrapper - no Rust FFI calls to create component
-    
-    ext := &rustExtension{
-        id:        set.ID,
-        logger:    set.Logger,
-        config:    rustCfg,           // Already validated JSON from Phase 2
-        buildInfo: set.BuildInfo,
-        
-        // Runtime state - will be set during Start()
-        rustHandle: nil,
-        started:    false,
-    }
-    
-    set.Logger.Debug("Created Rust extension wrapper", 
-        zap.String("id", set.ID.String()),
-        zap.String("type", set.ID.Type().String()))
-    
-    return ext, nil
-}
-````
+All Rust FFI calls for instance creation are deferred until the Start phase, ensuring configuration is validated and the Go wrapper is ready before any Rust component is started.
 
 ### Extension Instance Implementation
 
-````go
-// rustExtension implements extension.Extension (which embeds component.Component)
-type rustExtension struct {
-    id        component.ID
-    logger    *zap.Logger
-    config    *RustComponentConfig
-    buildInfo component.BuildInfo
-    
-    // Runtime state - set during Start()
-    rustHandle unsafe.Pointer  // Handle to Rust component instance
-    started    bool
-}
+The extension instance implementation manages the lifecycle of a Rust-backed extension component in Go, focusing on:
 
-// Start implements component.Component.Start - Creates and starts Rust component
-func (e *rustExtension) Start(ctx context.Context, host component.Host) error {
-    if e.started {
-        return fmt.Errorf("rust extension %s already started", e.id)
-    }
-    
-    e.logger.Info("Starting Rust extension", 
-        zap.String("id", e.id.String()),
-        zap.String("type", e.id.Type().String()),
-        zap.String("name", e.id.Name()))
-    
-    // NOW we call Rust to create and start the component instance
-    // Config was already validated during Create step
-    
-    // Prepare simplified context for Rust (placeholder)
-    ctxData := &FFIContext{
-        ComponentID:   e.id.String(),
-        ComponentType: e.id.Type().String(),
-        ComponentName: e.id.Name(),
-        Cancelled:     ctx.Err() != nil,
-        // TODO: Add timeout, deadline, values when implementing full context support
-    }
-    
-    // Prepare simplified host for Rust (placeholder)  
-    hostData := &FFIHost{
-        BuildVersion:    e.buildInfo.Version,
-        BuildCommand:    e.buildInfo.Command,
-        BuildTimestamp:  e.buildInfo.Timestamp,
-        ExtensionCount:  0, // TODO: Add extension registry info when implementing full host sharing
-    }
-    
-    // Convert to JSON for FFI transfer
-    ctxJSON, err := json.Marshal(ctxData)
-    if err != nil {
-        return fmt.Errorf("failed to marshal context for rust: %w", err)
-    }
-    
-    hostJSON, err := json.Marshal(hostData)
-    if err != nil {
-        return fmt.Errorf("failed to marshal host for rust: %w", err)
-    }
-    
-    // Call Rust create_and_start via rust2go
-    result, err := callRustCreateAndStart(
-        string(ctxJSON), 
-        string(hostJSON), 
-        e.config.rawJSON,  // Pre-validated config from Phase 2
-    )
-    if err != nil {
-        return fmt.Errorf("rust extension start call failed: %w", err)
-    }
-    
-    if result.ErrorMsg != "" {
-        return fmt.Errorf("rust extension start failed: %s", result.ErrorMsg)
-    }
-    
-    // Store handle for shutdown
-    e.rustHandle = result.Handle
-    e.started = true
-    
-    e.logger.Info("Rust extension started successfully")
-    return nil
-}
+- **Lifecycle State**: Maintains component ID, logger, validated config, and runtime state (Rust handle, started flag).
+- **Start Phase**:
+    - Checks if already started; logs startup event.
+    - Prepares simplified context and host data (as JSON) for FFI transfer.
+    - Calls Rust via rust2go to create and start the component instance, passing pre-validated config.
+    - Handles errors from FFI calls and propagates Rust error messages.
+    - Stores the Rust handle for later shutdown and marks as started.
+- **Shutdown Phase**:
+    - Checks if already stopped; logs shutdown event.
+    - Always cleans up Go state, even if Rust shutdown fails.
+    - Prepares context for shutdown and calls Rust via rust2go to clean up the instance.
+    - Logs errors but does not fail shutdown if Rust cleanup fails.
+- **Error Handling**: All FFI errors and Rust error messages are wrapped and logged for observability.
+- **Placeholder Data**: Uses placeholder structs for FFIContext and FFIHost, see phase 5.
 
-// Shutdown implements component.Component.Shutdown  
-func (e *rustExtension) Shutdown(ctx context.Context) error {
-    if !e.started {
-        e.logger.Debug("Rust extension shutdown called but not started")
-        return nil
-    }
-    
-    e.logger.Info("Shutting down Rust extension", zap.String("id", e.id.String()))
-    
-    // Always clean up Go state, even if Rust call fails
-    defer func() {
-        e.started = false
-        e.rustHandle = nil
-    }()
-    
-    // Prepare simplified context for shutdown
-    ctxData := &FFIContext{
-        ComponentID:   e.id.String(),
-        ComponentType: e.id.Type().String(), 
-        ComponentName: e.id.Name(),
-        Cancelled:     ctx.Err() != nil,
-    }
-    
-    ctxJSON, err := json.Marshal(ctxData)
-    if err != nil {
-        return fmt.Errorf("failed to marshal context for rust shutdown: %w", err)
-    }
-    
-    // rust2go call for shutdown
-    err = callRustShutdown(e.rustHandle, string(ctxJSON))
-    if err != nil {
-        // Log error but don't fail shutdown - always clean up
-        e.logger.Error("Rust extension shutdown failed", zap.Error(err))
-    }
-    
-    e.logger.Info("Rust extension shutdown successfully")
-    return nil
-}
-````
-
-### FFI Data Structures (Placeholders)
-
-````go
-// FFIContext - simplified context for FFI transfer
-type FFIContext struct {
-    ComponentID   string `json:"component_id"`
-    ComponentType string `json:"component_type"`
-    ComponentName string `json:"component_name"`
-    Cancelled     bool   `json:"cancelled"`
-    // TODO Phase 4+: Add timeout, deadline, values when implementing full context support
-}
-
-// FFIHost - simplified host for FFI transfer  
-type FFIHost struct {
-    BuildVersion   string `json:"build_version"`
-    BuildCommand   string `json:"build_command"`
-    BuildTimestamp string `json:"build_timestamp"`
-    ExtensionCount int    `json:"extension_count"`
-    // TODO Phase 4+: Add extension registry, resource info when implementing full host sharing
-}
-
-// RustResult - result from rust2go calls
-type RustResult struct {
-    Handle   unsafe.Pointer `json:"-"`
-    ErrorMsg string         `json:"error_msg,omitempty"`
-}
-````
+This design ensures clear separation between Go and Rust responsibilities, robust error handling, and a clean lifecycle for extension components across the FFI boundary.
 
 ### rust2go Integration Layer
 
@@ -494,48 +214,35 @@ func (c *RustComponentConfig) Marshal(conf *confmap.Conf) error {
 ### Component Trait (Rust Placeholder)
 
 ````rust
-// This is a placeholder - will be implemented by Rust team
+// This is a placeholder - will be implemented by Rust team, see
+// integration in phase 4 document.
 use rust2go::r2g;
 use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Deserialize, Serialize)]
 pub struct FFIContext {
-    pub component_id: String,
-    pub component_type: String,
-    pub component_name: String,
-    pub cancelled: bool,
+    ...
 }
 
 #[derive(Debug, Deserialize, Serialize)]
 pub struct FFIHost {
-    pub build_version: String,
-    pub build_command: String,
-    pub build_timestamp: String,
-    pub extension_count: u32,
+    ...
 }
 
 #[derive(Debug, Deserialize, Serialize)]
 pub struct ExtensionConfig {
     pub endpoint: Option<String>,
     pub timeout_ms: u64,
-    pub enabled: bool,
 }
 
 impl ExtensionConfig {
     pub fn validate(&self) -> Result<(), String> {
-        if let Some(ref endpoint) = self.endpoint {
-            if endpoint.is_empty() {
-                return Err("endpoint cannot be empty when specified".to_string());
-            }
-        }
-        if self.timeout_ms == 0 {
-            return Err("timeout_ms must be greater than 0".to_string());
-        }
+        // ...
         Ok(())
     }
 }
 
-#[rust2go::r2g(queue_size = 1024)]
+#[rust2go::r2g]
 pub trait ExtensionLifecycle {
     // Create AND Start in one call - config already validated in Phase 2
     #[mem]
@@ -553,48 +260,6 @@ pub trait ExtensionLifecycle {
     ) -> Result<(), String>;
 }
 
-// Placeholder implementation
-pub struct SampleExtension {
-    started: bool,
-    config: Option<ExtensionConfig>,
-}
-
-impl ExtensionLifecycle for SampleExtension {
-    async fn create_and_start(&mut self, ctx: &str, host: &str, config: &str) -> Result<(), String> {
-        // Parse pre-validated config - this should never fail
-        let config: ExtensionConfig = serde_json::from_str(config)
-            .map_err(|e| format!("unexpected config parse error: {}", e))?;
-            
-        let ctx_info: FFIContext = serde_json::from_str(ctx)
-            .map_err(|e| format!("context parse error: {}", e))?;
-            
-        let host_info: FFIHost = serde_json::from_str(host)
-            .map_err(|e| format!("host parse error: {}", e))?;
-        
-        println!("Creating and starting extension {} with validated config", ctx_info.component_id);
-        println!("Host: {} {}", host_info.build_command, host_info.build_version);
-        
-        // Initialize extension with validated config
-        self.config = Some(config);
-        self.started = true;
-        
-        // Start any background tasks here
-        
-        Ok(())
-    }
-    
-    async fn shutdown(&mut self, ctx: &str) -> Result<(), String> {
-        let ctx_info: FFIContext = serde_json::from_str(ctx)?;
-        
-        println!("Shutting down extension {}", ctx_info.component_id);
-        
-        // Stop any background tasks here
-        self.started = false;
-        self.config = None;
-        
-        Ok(())
-    }
-}
 ````
 
 ### Configuration Validation (From Phase 2)
@@ -698,159 +363,16 @@ rust2go automatically manages the underlying `Box<ComponentInstance>` lifecycle,
 - [ ] Test async patterns with rust2go framework
 - [ ] Validate error handling and result parsing
 
-### Step 6: Full Integration Testing
-
-- [ ] Test complete lifecycle with real collector service
-- [ ] Verify extension ordering and dependency management
-- [ ] Test error scenarios and recovery patterns
-- [ ] Performance testing of FFI calls and JSON marshaling
-
-### Step 7: Documentation and Examples
-
-- [ ] Document the Create vs Start separation clearly
-- [ ] Provide configuration examples matching Phase 2 patterns
-- [ ] Create integration examples with collector service
-- [ ] Document placeholder interfaces for future phases
-
-## Testing Strategy
-
-### Unit Tests
-
-````go
-func TestExtensionFactoryLifecycleSeparation(t *testing.T) {
-    factory := NewFactory()
-    
-    // Step 1: Create with config validation
-    cfg := factory.CreateDefaultConfig()
-    set := extension.Settings{
-        ID:                component.NewID(factory.Type()),
-        TelemetrySettings: componenttest.NewNopTelemetrySettings(),
-        BuildInfo:         component.NewDefaultBuildInfo(),
-    }
-    
-    // This should work - only Go wrapper created, no Rust instance
-    ext, err := factory.Create(context.Background(), set, cfg)
-    require.NoError(t, err)
-    require.NotNil(t, ext)
-    
-    rustExt := ext.(*rustExtension)
-    assert.False(t, rustExt.started)      // Not started yet
-    assert.Nil(t, rustExt.rustHandle)     // No Rust instance yet
-    assert.NotNil(t, rustExt.config)      // Config is set
-    
-    // Step 2: Start runtime activation  
-    host := componenttest.NewNopHost()
-    err = ext.Start(context.Background(), host)
-    require.NoError(t, err)
-    
-    assert.True(t, rustExt.started)       // Now started
-    assert.NotNil(t, rustExt.rustHandle)  // Rust instance created
-    
-    // Step 3: Shutdown cleanup
-    err = ext.Shutdown(context.Background())
-    require.NoError(t, err)
-    
-    assert.False(t, rustExt.started)      // Stopped
-    assert.Nil(t, rustExt.rustHandle)     // Handle cleared
-}
-
-func TestConfigurationValidationBeforeCreate(t *testing.T) {
-    factory := NewFactory()
-    
-    // Test with invalid config JSON
-    invalidCfg := &RustComponentConfig{
-        rawJSON: `{"timeout_ms": 0}`,  // Invalid - timeout must be > 0
-    }
-    
-    set := extension.Settings{
-        ID:                component.NewID(factory.Type()),
-        TelemetrySettings: componenttest.NewNopTelemetrySettings(),
-        BuildInfo:         component.NewDefaultBuildInfo(),
-    }
-    
-    // Create should succeed even with invalid config (validation happened earlier)
-    ext, err := factory.Create(context.Background(), set, invalidCfg)
-    require.NoError(t, err)
-    
-    // But Start should fail when Rust tries to use the config
-    host := componenttest.NewNopHost()
-    err = ext.Start(context.Background(), host)
-    require.Error(t, err)
-    assert.Contains(t, err.Error(), "timeout_ms must be greater than 0")
-}
-
-func TestErrorHandlingInStart(t *testing.T) {
-    factory := NewFactory()
-    cfg := factory.CreateDefaultConfig()
-    
-    set := extension.Settings{
-        ID:                component.NewID(factory.Type()),
-        TelemetrySettings: componenttest.NewNopTelemetrySettings(),
-        BuildInfo:         component.NewDefaultBuildInfo(),
-    }
-    
-    ext, err := factory.Create(context.Background(), set, cfg)
-    require.NoError(t, err)
-    
-    // Test context cancellation
-    cancelCtx, cancel := context.WithCancel(context.Background())
-    cancel() // Cancel immediately
-    
-    host := componenttest.NewNopHost()
-    err = ext.Start(cancelCtx, host)
-    // Should handle cancelled context gracefully
-    if err != nil {
-        assert.Contains(t, err.Error(), "context")
-    }
-}
-````
-
-### Integration Tests
-
-````go
-func TestRustExtensionWithCollector(t *testing.T) {
-    // Test with real collector service
-    factories := map[component.Type]extension.Factory{
-        component.MustNewType("rust_sample"): NewFactory(),
-    }
-    
-    cfg := &Config{
-        Extensions: []component.ID{
-            component.NewID(component.MustNewType("rust_sample")),
-        },
-    }
-    
-    extensionConfigs := map[component.ID]component.Config{
-        component.NewID(component.MustNewType("rust_sample")): NewFactory().CreateDefaultConfig(),
-    }
-    
-    extensions, err := New(context.Background(), Settings{
-        Telemetry:  componenttest.NewNopTelemetrySettings(),
-        BuildInfo:  component.NewDefaultBuildInfo(),
-        Extensions: builders.NewExtension(extensionConfigs, factories),
-    }, cfg.Extensions)
-    
-    require.NoError(t, err)
-    
-    // Test full lifecycle - this tests the Create/Start separation
-    host := componenttest.NewNopHost()
-    
-    // All components created first
-    err = extensions.Start(context.Background(), host)
-    require.NoError(t, err)
-    
-    // Then all started in order
-    err = extensions.Shutdown(context.Background())
-    require.NoError(t, err)
-}
-````
 
 ## Build Integration
 
 ### Go Module Dependencies
 
-````go
-// go.mod
+The Go module requires standard OpenTelemetry Collector dependencies:
+
+**go.mod file:**
+
+```go
 module github.com/example/otel-rust-extension
 
 go 1.21
@@ -861,14 +383,19 @@ require (
     go.opentelemetry.io/collector/confmap v1.22.0
     go.uber.org/zap v1.26.0
 )
+```
 
-// CGO flags for linking rust2go generated library
+**CGO Integration:**
+
+The Go source files include CGO directives for linking with the rust2go generated library:
+
+```go
 /*
 #cgo LDFLAGS: -L./rust/target/release -lrust_extension
 #cgo CFLAGS: -I./rust/target/release
 */
 import "C"
-````
+```
 
 ### CGO Header (Generated by rust2go)
 
@@ -905,94 +432,6 @@ void free_rust_string(char* ptr);
 
 #endif
 ````
-
-## Error Handling Strategy
-
-### Go Error Patterns
-
-````go
-// Standardized error wrapping for rust FFI calls
-func wrapRustError(operation string, rustError string) error {
-    return fmt.Errorf("rust extension %s failed: %s", operation, rustError)
-}
-
-// Error handling in Start with context
-func (e *rustExtension) Start(ctx context.Context, host component.Host) error {
-    // ... setup code ...
-    
-    if result.ErrorMsg != "" {
-        return wrapRustError("start", result.ErrorMsg)
-    }
-    
-    return nil
-}
-
-// Graceful shutdown on errors
-func (e *rustExtension) Shutdown(ctx context.Context) error {
-    if !e.started {
-        return nil // Already shutdown or never started
-    }
-    
-    // Always attempt cleanup even if Rust call fails
-    defer func() {
-        e.started = false
-        e.rustHandle = nil
-    }()
-    
-    err := callRustShutdown(e.rustHandle, ctxJSON)
-    if err != nil {
-        // Log but don't fail shutdown - cleanup is more important
-        e.logger.Error("Rust extension shutdown error", zap.Error(err))
-    }
-    
-    return nil
-}
-````
-
-## Phase Integration Summary
-
-### Phase 1 → Phase 3 Connection
-
-- **cargo Field Usage**: Phase 1's `cargo` field in Module struct identifies Rust extensions for rust2go processing
-- **Builder Integration**: Factory registration leverages Phase 1's builder tool infrastructure
-- **Template Generation**: Extension factories generated using Phase 1's template system patterns
-
-### Phase 2 → Phase 3 Connection
-
-- **Configuration Reuse**: `RustComponentConfig` from Phase 2 used unchanged for extension configuration
-- **Validation Timing**: Phase 2's config validation during `confmap.Unmarshal()` happens before Phase 3's `Create()`
-- **JSON Bridge**: Phase 2's JSON serialization patterns continue seamlessly into runtime FFI calls
-- **Error Propagation**: Phase 2's error handling patterns extended to runtime component lifecycle
-
-### Phase 3 → Phase 4 Preparation
-
-- **Handle Patterns**: Extension handle management provides foundation for processor/exporter handles
-- **Lifecycle Separation**: Create/Start separation scales to data processing components
-- **Async Integration**: rust2go async patterns ready for high-throughput telemetry processing
-- **Placeholder Evolution**: FFIContext and FFIHost placeholders ready for full implementation
-
-## Integration Points
-
-### Phase 2 Configuration
-
-- Uses `RustComponentConfig` wrapper unchanged from Phase 2
-- Leverages serde configuration parsing and validation
-- Configuration validation happens during confmap.Unmarshal, before Create()
-- JSON configuration transfer patterns established in Phase 2
-
-### Phase 4 Preparation
-
-- Establishes component lifecycle patterns for data processing components
-- Provides foundation for telemetry data processing with handles
-- Tests async patterns needed for data pipelines
-- Handle management patterns ready for processor/exporter components
-
-### Future Phase Integration
-
-- Context placeholder ready for full context.Context implementation
-- Host placeholder ready for full component.Host sharing
-- Extension registry patterns established for cross-component communication
-- Error handling patterns established for complex runtime scenarios
 
 ## Success Criteria
 

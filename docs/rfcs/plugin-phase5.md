@@ -2,11 +2,11 @@
 
 ## Overview
 
-Phase 5 establishes bi-directional metadata propagation between Go and Rust runtimes, enabling seamless context flow and error handling across the FFI boundary. This phase builds on the otap-dataflow integration from Phase 4 and provides the foundation for production-grade telemetry processing with proper observability, cancellation, and error propagation.
+Phase 5 establishes bidirectional metadata propagation between Go and Rust runtimes, enabling seamless context flow and error handling across the FFI boundary. This phase builds on Phase 4's otap-dataflow integration and provides the foundation for production-grade telemetry processing with proper observability, cancellation, and error propagation.
 
 ## Design Goals
 
-1. **Forward Context Propagation**: Seamlessly propagate Go `context.Context` with timeouts, cancellation, and metadata to Rust EffectHandler
+1. **Forward Context Propagation**: Propagate Go `context.Context` with timeouts, cancellation, and metadata to Rust EffectHandler
 2. **Reverse Error Propagation**: Translate Rust enum-structured errors to Go error interface with proper permanent/retryable classification
 3. **Standards Compliance**: Follow gRPC and HTTP metadata conventions established in the collector
 4. **Performance**: Minimize serialization overhead for high-throughput data processing
@@ -50,807 +50,417 @@ Rust Error {
 
 ### Context Transfer Strategy
 
-Phase 5 uses rust2go's native struct marshaling for simple context data, with JSON as a fallback for complex scenarios that prove difficult to marshal directly.
+Phase 5 uses a dual strategy for transferring Go context information to Rust:
 
-#### Primary Approach: rust2go Struct Marshaling
+1. **Primary: rust2go Struct Marshaling** - Direct marshaling of context data structures for optimal performance
+2. **Fallback: JSON Serialization** - Used when rust2go marshaling proves difficult for complex metadata scenarios
 
-```go
-// ContextTransfer represents context information for rust2go marshaling
-type ContextTransfer struct {
-    // Deadline information
-    DeadlineUnix int64  `json:"deadline_unix"`
-    HasDeadline  bool   `json:"has_deadline"`
-    
-    // Cancellation token ID for rust2go management
-    CancelTokenID string `json:"cancel_token_id"`
-    
-    // Simple metadata (rust2go can marshal map[string][]string)
-    Metadata map[string][]string `json:"metadata,omitempty"`
-    
-    // Distributed tracing context
-    TraceID    []byte `json:"trace_id,omitempty"`
-    SpanID     []byte `json:"span_id,omitempty"`
-    TraceFlags uint32 `json:"trace_flags"`
-    TraceState string `json:"trace_state,omitempty"`
-    Remote     bool   `json:"remote"`
-}
+### Context Information Flow
 
-// extractContextTransfer prepares Go context for rust2go marshaling
-func extractContextTransfer(ctx context.Context) (*ContextTransfer, context.CancelFunc) {
-    transfer := &ContextTransfer{}
-    
-    // Extract deadline
-    if deadline, ok := ctx.Deadline(); ok {
-        transfer.DeadlineUnix = deadline.Unix()
-        transfer.HasDeadline = true
-    }
-    
-    // Extract client metadata
-    if clientInfo := client.FromContext(ctx); clientInfo.Metadata != nil {
-        transfer.Metadata = make(map[string][]string)
-        for key := range clientInfo.Metadata.Keys() {
-            transfer.Metadata[key] = clientInfo.Metadata.Get(key)
-        }
-    }
-    
-    // Extract tracing span context
-    if spanCtx := trace.SpanContextFromContext(ctx); spanCtx.IsValid() {
-        traceID := spanCtx.TraceID()
-        spanID := spanCtx.SpanID()
-        transfer.TraceID = traceID[:]
-        transfer.SpanID = spanID[:]
-        transfer.TraceFlags = uint32(spanCtx.TraceFlags())
-        transfer.TraceState = spanCtx.TraceState().String()
-        transfer.Remote = spanCtx.IsRemote()
-    }
-    
-    // Generate cancellation token for rust2go
-    cancelCtx, cancelFunc := context.WithCancel(ctx)
-    transfer.CancelTokenID = generateCancelTokenID()
-    
-    // Register cancellation monitoring
-    go monitorCancellation(cancelCtx, transfer.CancelTokenID)
-    
-    return transfer, cancelFunc
-}
-```
+The context transfer process extracts key information from Go's `context.Context`:
 
-#### Fallback Approach: JSON Serialization
+**Timing Information**:
 
-If rust2go struct marshaling proves difficult for complex metadata scenarios:
+- Deadline timestamps (Unix time) when present
+- Boolean flags indicating deadline presence
+- Timeout calculations for Rust async operations
 
-```go
-// JSONContextTransfer as fallback for complex cases
-type JSONContextTransfer struct {
-    ContextJSON string `json:"context_json"`
-}
+**Cancellation Coordination**:
 
-func extractContextTransferJSON(ctx context.Context) (*JSONContextTransfer, context.CancelFunc) {
-    transfer, cancelFunc := extractContextTransfer(ctx)
-    
-    jsonBytes, err := json.Marshal(transfer)
-    if err != nil {
-        // Fallback to minimal context
-        jsonBytes = []byte(`{"has_deadline":false,"metadata":{}}`)
-    }
-    
-    return &JSONContextTransfer{
-        ContextJSON: string(jsonBytes),
-    }, cancelFunc
-}
-```
+- Unique cancellation token IDs for cross-runtime coordination
+- Go-side cancellation monitoring with immediate Rust notification
+- Bidirectional cancellation channel management
 
-#### Cancellation Token Management
+**Client Metadata Propagation**:
 
-```go
-// CancellationRegistry manages active cancellation tokens
-type CancellationRegistry struct {
-    mu     sync.RWMutex
-    tokens map[string]chan struct{}
-}
+- Extraction from existing `client.Metadata` patterns
+- Key-value mapping following gRPC/HTTP conventions
+- Preservation of multiple values per metadata key
 
-var globalCancelRegistry = &CancellationRegistry{
-    tokens: make(map[string]chan struct{}),
-}
+**Distributed Tracing Context**:
 
-func (cr *CancellationRegistry) Register(tokenID string) chan struct{} {
-    cr.mu.Lock()
-    defer cr.mu.Unlock()
-    
-    cancelChan := make(chan struct{})
-    cr.tokens[tokenID] = cancelChan
-    return cancelChan
-}
+- OpenTelemetry trace ID and span ID propagation
+- Trace flags and trace state preservation
+- Remote span context indication
 
-func (cr *CancellationRegistry) Cancel(tokenID string) {
-    cr.mu.Lock()
-    defer cr.mu.Unlock()
-    
-    if cancelChan, exists := cr.tokens[tokenID]; exists {
-        close(cancelChan)
-        delete(cr.tokens, tokenID)
-    }
-}
+The cancellation system provides immediate coordination between Go context cancellation and Rust async operations:
 
-// monitorCancellation watches for Go context cancellation and signals Rust
-func monitorCancellation(ctx context.Context, tokenID string) {
-    select {
-    case <-ctx.Done():
-        // Signal cancellation to Rust through rust2go
-        globalCancelRegistry.Cancel(tokenID)
-        
-        // Notify Rust via rust2go async call
-        go func() {
-            _ = callRustCancelToken(tokenID)
-        }()
-    }
-}
-```
+- **Token Registry**: Global registry manages active cancellation tokens
+- **Monitoring**: Background goroutines watch for Go context cancellation
+- **Notification**: Immediate rust2go async calls signal cancellation to Rust
+- **Cleanup**: Automatic token cleanup after cancellation or completion
 
 ### rust2go FFI Integration
 
-```rust
-// Context transfer structures matching Go types
-#[derive(Debug, Clone)]
-pub struct ContextTransfer {
-    pub deadline_unix: i64,
-    pub has_deadline: bool,
-    pub cancel_token_id: String,
-    pub metadata: HashMap<String, Vec<String>>,
-    pub trace_id: Vec<u8>,
-    pub span_id: Vec<u8>,
-    pub trace_flags: u32,
-    pub trace_state: String,
-    pub remote: bool,
-}
+Rust receives context information through rust2go's marshaling system and integrates it with async cancellation patterns:
 
-// Rust cancellation token integration
-#[derive(Clone)]
-pub struct CrossRuntimeCancelToken {
-    token_id: String,
-    cancel_tx: Option<tokio::sync::broadcast::Sender<()>>,
-    cancel_rx: tokio::sync::broadcast::Receiver<()>,
-}
+**Context Structure Translation**:
 
-impl CrossRuntimeCancelToken {
-    pub fn new(token_id: String) -> Self {
-        let (cancel_tx, cancel_rx) = tokio::sync::broadcast::channel(1);
-        Self {
-            token_id,
-            cancel_tx: Some(cancel_tx),
-            cancel_rx,
-        }
-    }
-    
-    pub async fn cancelled(&mut self) -> bool {
-        match self.cancel_rx.recv().await {
-            Ok(_) | Err(tokio::sync::broadcast::error::RecvError::Closed) => true,
-            Err(tokio::sync::broadcast::error::RecvError::Lagged(_)) => true,
-        }
-    }
-    
-    pub fn cancel(&self) {
-        if let Some(tx) = &self.cancel_tx {
-            let _ = tx.send(());
-        }
-    }
-}
+- Direct mapping from Go context transfer structures to Rust equivalents
+- HashMap conversion for metadata with proper key/value preservation
+- Byte array handling for trace context information
 
-// rust2go trait for cancellation management
-#[rust2go::r2g(queue_size = 1024)]
-pub trait CancellationBridge {
-    #[mem]
-    async fn cancel_token(&mut self, token_id: String) -> Result<(), String>;
-}
+**Cancellation Token Integration**:
 
-impl CancellationBridge for CancellationBridgeImpl {
-    async fn cancel_token(&mut self, token_id: String) -> Result<(), String> {
-        if let Some(token) = self.active_tokens.get(&token_id) {
-            token.cancel();
-            self.active_tokens.remove(&token_id);
-        }
-        Ok(())
-    }
-}
-```
+- Tokio broadcast channels for async cancellation coordination
+- Cross-runtime token management with automatic cleanup
+- Select-based cancellation in async operations
+
+**rust2go Trait Implementation**:
+
+- Dedicated traits for cancellation bridge operations
+- Async FFI patterns for non-blocking cancellation signaling
+- Queue-based message handling for high-frequency operations
 
 ### EffectHandler Context Integration
 
 Phase 5 extends the existing otap-dataflow EffectHandler with cross-runtime context awareness:
 
-```rust
-// Enhanced EffectHandler with context propagation
-pub struct ContextAwareEffectHandler<PData> {
-    inner: shared::EffectHandler<PData>,
-    context: Option<ContextTransfer>,
-    cancel_token: Option<CrossRuntimeCancelToken>,
-}
+**Context-Aware EffectHandler Enhancement**:
 
-impl<PData> ContextAwareEffectHandler<PData> {
-    pub fn new(
-        inner: shared::EffectHandler<PData>,
-        context: ContextTransfer,
-    ) -> Self {
-        let cancel_token = if !context.cancel_token_id.is_empty() {
-            Some(CrossRuntimeCancelToken::new(context.cancel_token_id.clone()))
-        } else {
-            None
-        };
-        
-        Self {
-            inner,
-            cancel_token,
-            context: Some(context),
-        }
-    }
-    
-    // Forward send_message with timeout and cancellation
-    pub async fn send_message(&self, data: PData) -> Result<(), Error<PData>> {
-        if let Some(ref cancel_token) = &self.cancel_token {
-            tokio::select! {
-                result = self.inner.send_message(data) => result,
-                _ = cancel_token.cancelled() => {
-                    Err(Error::Cancelled {
-                        reason: "Context cancelled from Go runtime".to_string(),
-                    })
-                }
-            }
-        } else {
-            self.inner.send_message(data).await
-        }
-    }
-    
-    // Timeout-aware send with deadline
-    pub async fn send_message_with_timeout(&self, data: PData) -> Result<(), Error<PData>> {
-        if let Some(context) = &self.context {
-            if context.has_deadline {
-                let deadline = SystemTime::UNIX_EPOCH + Duration::from_secs(context.deadline_unix as u64);
-                let timeout = deadline.duration_since(SystemTime::now())
-                    .unwrap_or(Duration::ZERO);
-                    
-                tokio::select! {
-                    result = self.send_message(data) => result,
-                    _ = tokio::time::sleep(timeout) => {
-                        Err(Error::Timeout {
-                            deadline: context.deadline_unix,
-                        })
-                    }
-                }
-            } else {
-                self.send_message(data).await
-            }
-        } else {
-            self.send_message(data).await
-        }
-    }
-    
-    // Access to propagated metadata
-    pub fn metadata(&self) -> Option<&HashMap<String, Vec<String>>> {
-        self.context.as_ref().map(|c| &c.metadata)
-    }
-    
-    // Tracing context access
-    pub fn trace_context(&self) -> Option<(&[u8], &[u8], u32, &str, bool)> {
-        self.context.as_ref().map(|c| (
-            &c.trace_id[..],
-            &c.span_id[..],
-            c.trace_flags,
-            &c.trace_state,
-            c.remote
-        ))
-    }
-}
-```
+- Wraps existing EffectHandler with context propagation capabilities
+- Integrates cancellation tokens for immediate async operation cancellation
+- Provides timeout-aware send operations using context deadline information
+- Maintains backward compatibility with existing EffectHandler interface
+
+**Timeout and Cancellation Integration**:
+
+- `send_message_with_timeout()` operations respect Go context deadlines
+- Tokio `select!` patterns coordinate between data sending and cancellation events
+- Automatic deadline checking before initiating long-running operations
+- Graceful error handling when operations are cancelled or timeout
+
+**Metadata and Tracing Access**:
+
+- Helper methods provide access to propagated client metadata
+- Trace context information available for distributed tracing integration
+- Metadata access follows existing collector conventions (case-insensitive keys)
+- Support for multi-value metadata headers
 
 ## Reverse Error Propagation Design
 
 ### Rust Error Enumeration
 
-Phase 5 establishes structured error types that can be marshaled via rust2go or JSON fallback:
+Phase 5 establishes structured error types for seamless marshaling across the Go/Rust boundary:
 
-```rust
-// Standard error types for cross-runtime propagation
-#[derive(Debug, Clone)]
-pub enum ProcessingError {
-    // Permanent errors - do not retry
-    Permanent {
-        message: String,
-        grpc_code: Option<i32>,      // gRPC codes::Code as i32
-        http_status: Option<u16>,    // HTTP status code
-    },
-    
-    // Retryable errors
-    Retryable {
-        message: String,
-        grpc_code: Option<i32>,
-        http_status: Option<u16>,
-        retry_after: Option<u64>,    // Seconds to wait before retry
-    },
-    
-    // Cancellation (special case of permanent)
-    Cancelled {
-        reason: String,
-    },
-    
-    // Timeout (retryable by default)
-    Timeout {
-        deadline: i64,
-    },
-    
-    // Resource exhaustion with backoff
-    ResourceExhausted {
-        message: String,
-        retry_after: Option<u64>,
-    },
-    
-    // Configuration errors (permanent)
-    Configuration {
-        message: String,
-        field: Option<String>,
-    },
-}
+**Structured Error Classification**:
 
-impl ProcessingError {
-    // Convenience constructors following gRPC conventions
-    pub fn permanent(message: impl Into<String>) -> Self {
-        Self::Permanent {
-            message: message.into(),
-            grpc_code: Some(13), // codes::Internal
-            http_status: Some(500),
-        }
-    }
-    
-    pub fn retryable(message: impl Into<String>) -> Self {
-        Self::Retryable {
-            message: message.into(),
-            grpc_code: Some(14), // codes::Unavailable
-            http_status: Some(503),
-            retry_after: None,
-        }
-    }
-    
-    pub fn invalid_argument(message: impl Into<String>) -> Self {
-        Self::Permanent {
-            message: message.into(),
-            grpc_code: Some(3), // codes::InvalidArgument
-            http_status: Some(400),
-        }
-    }
-    
-    pub fn resource_exhausted(message: impl Into<String>, retry_after: Option<u64>) -> Self {
-        Self::ResourceExhausted {
-            message: message.into(),
-            retry_after,
-        }
-    }
-    
-    // Error classification for Go translation
-    pub fn is_permanent(&self) -> bool {
-        matches!(self, 
-            ProcessingError::Permanent { .. } | 
-            ProcessingError::Cancelled { .. } |
-            ProcessingError::Configuration { .. }
-        )
-    }
-    
-    pub fn grpc_code(&self) -> i32 {
-        match self {
-            ProcessingError::Permanent { grpc_code, .. } => grpc_code.unwrap_or(13),
-            ProcessingError::Retryable { grpc_code, .. } => grpc_code.unwrap_or(14),
-            ProcessingError::Cancelled { .. } => 1, // codes::Cancelled
-            ProcessingError::Timeout { .. } => 4,   // codes::DeadlineExceeded
-            ProcessingError::ResourceExhausted { .. } => 8, // codes::ResourceExhausted
-            ProcessingError::Configuration { .. } => 3,     // codes::InvalidArgument
-        }
-    }
-    
-    pub fn http_status(&self) -> u16 {
-        match self {
-            ProcessingError::Permanent { http_status, .. } => http_status.unwrap_or(500),
-            ProcessingError::Retryable { http_status, .. } => http_status.unwrap_or(503),
-            ProcessingError::Cancelled { .. } => 499, // Client Closed Request
-            ProcessingError::Timeout { .. } => 504,   // Gateway Timeout
-            ProcessingError::ResourceExhausted { .. } => 429, // Too Many Requests
-            ProcessingError::Configuration { .. } => 400,     // Bad Request
-        }
-    }
-    
-    pub fn retry_after(&self) -> Option<u64> {
-        match self {
-            ProcessingError::Retryable { retry_after, .. } => *retry_after,
-            ProcessingError::ResourceExhausted { retry_after, .. } => *retry_after,
-            _ => None,
-        }
-    }
-}
-```
+- **Permanent Errors**: Configuration issues, invalid arguments, authentication failures (no retry)
+- **Retryable Errors**: Temporary failures, network issues, resource unavailability
+- **Cancellation Errors**: Operations cancelled due to context cancellation from Go runtime
+- **Timeout Errors**: Operations exceeding deadline (retryable by default)
+- **Resource Exhaustion**: Rate limiting or capacity issues with optional retry-after timing
+- **Configuration Errors**: Invalid component configuration (permanent failures)
+
+**gRPC and HTTP Code Integration**:
+
+Each error type includes appropriate status codes following collector conventions:
+
+- Permanent errors: `codes.Internal` (gRPC) / 500 (HTTP)
+- Retryable errors: `codes.Unavailable` (gRPC) / 503 (HTTP)
+- Cancellation: `codes.Cancelled` (gRPC) / 499 (HTTP)
+- Timeout: `codes.DeadlineExceeded` (gRPC) / 504 (HTTP)
+- Resource exhaustion: `codes.ResourceExhausted` (gRPC) / 429 (HTTP)
+
+**Retry Semantics**:
+
+- Optional retry-after timing for rate limiting scenarios
+- Classification methods for Go error translation (`is_permanent()`)
+- Convenience constructors for common error patterns
 
 ### rust2go Error Transfer
 
-```rust
-// Simplified error transfer for rust2go marshaling
-#[derive(Debug, Clone)]
-pub struct ErrorTransfer {
-    pub message: String,
-    pub permanent: bool,
-    pub grpc_code: i32,
-    pub http_status: u16,
-    pub retry_after: Option<u64>,
-    pub error_type: String,
-}
+Error information crosses the runtime boundary through simplified transfer structures optimized for rust2go marshaling:
 
-impl From<ProcessingError> for ErrorTransfer {
-    fn from(err: ProcessingError) -> Self {
-        Self {
-            message: match &err {
-                ProcessingError::Permanent { message, .. } => message.clone(),
-                ProcessingError::Retryable { message, .. } => message.clone(),
-                ProcessingError::Cancelled { reason } => reason.clone(),
-                ProcessingError::Timeout { deadline } => format!("Timeout at deadline {}", deadline),
-                ProcessingError::ResourceExhausted { message, .. } => message.clone(),
-                ProcessingError::Configuration { message, .. } => message.clone(),
-            },
-            permanent: err.is_permanent(),
-            grpc_code: err.grpc_code(),
-            http_status: err.http_status(),
-            retry_after: err.retry_after(),
-            error_type: match err {
-                ProcessingError::Permanent { .. } => "permanent".to_string(),
-                ProcessingError::Retryable { .. } => "retryable".to_string(),
-                ProcessingError::Cancelled { .. } => "cancelled".to_string(),
-                ProcessingError::Timeout { .. } => "timeout".to_string(),
-                ProcessingError::ResourceExhausted { .. } => "resource_exhausted".to_string(),
-                ProcessingError::Configuration { .. } => "configuration".to_string(),
-            },
-        }
-    }
-}
-```
+**Error Transfer Structure**:
+
+- Flattened error representation with essential information for Go error translation
+- String message preservation with context information
+- Boolean permanent/retryable classification for immediate Go error handling
+- Numeric code preservation for gRPC and HTTP status integration
+- Optional retry timing for rate limiting scenarios
+- Error type categorization for structured handling
+
+**Marshaling Strategy**:
+
+- Primary use of rust2go struct marshaling for performance
+- JSON fallback for complex error scenarios
+- Minimal serialization overhead with precomputed error properties
+- Automatic conversion from structured Rust enums to transfer format
 
 ### Go Error Translation
 
-```go
-// RustProcessingError wraps rust2go error transfers for Go error interface
-type RustProcessingError struct {
-    Message      string  `json:"message"`
-    Permanent    bool    `json:"permanent"`
-    GRPCCode     int32   `json:"grpc_code"`
-    HTTPStatus   uint16  `json:"http_status"`
-    RetryAfter   *uint64 `json:"retry_after,omitempty"`
-    ErrorType    string  `json:"error_type"`
-}
+Go receives rust2go error transfers and translates them into appropriate Go error types following collector conventions:
 
-func (e *RustProcessingError) Error() string {
-    return e.Message
-}
+**Error Type Translation**:
 
-// translateRustError converts rust2go error transfer to Go error types
-func translateRustError(errorTransfer *ErrorTransfer) error {
-    if errorTransfer == nil {
-        return nil
-    }
-    
-    baseErr := &RustProcessingError{
-        Message:    errorTransfer.Message,
-        Permanent:  errorTransfer.Permanent,
-        GRPCCode:   errorTransfer.GRPCCode,
-        HTTPStatus: errorTransfer.HTTPStatus,
-        RetryAfter: errorTransfer.RetryAfter,
-        ErrorType:  errorTransfer.ErrorType,
-    }
-    
-    // Apply consumererror classification
-    if errorTransfer.Permanent {
-        return consumererror.NewPermanent(baseErr)
-    }
-    
-    // Check for specific gRPC error codes that should be permanent
-    switch codes.Code(errorTransfer.GRPCCode) {
-    case codes.InvalidArgument, codes.Unauthenticated, codes.PermissionDenied, codes.Unimplemented:
-        return consumererror.NewPermanent(baseErr)
-    default:
-        return baseErr // Retryable by default
-    }
-}
+- `RustProcessingError` implements Go's `error` interface with full error information
+- Integration with `consumererror.NewPermanent()` for non-retryable errors
+- Automatic classification based on error permanence and gRPC codes
+- Preservation of retry timing and metadata for higher-level retry logic
 
-// Integration with existing error handling patterns
-func (e *RustProcessingError) GRPCStatus() *status.Status {
-    st := status.New(codes.Code(e.GRPCCode), e.Message)
-    
-    // Add retry information if available
-    if e.RetryAfter != nil {
-        retryInfo := &errdetails.RetryInfo{
-            RetryDelay: durationpb.New(time.Duration(*e.RetryAfter) * time.Second),
-        }
-        if st, err := st.WithDetails(retryInfo); err == nil {
-            return st
-        }
-    }
-    
-    return st
-}
+**gRPC Integration**:
 
-func (e *RustProcessingError) HTTPStatusCode() int {
-    return int(e.HTTPStatus)
-}
-```
+- Automatic conversion to gRPC `status.Status` with appropriate codes
+- Integration with error details for retry information
+- Support for existing gRPC error handling patterns in the collector
+
+**HTTP Status Integration**:
+
+- HTTP status code preservation for HTTP-based exporters and receivers
+- Standard HTTP error patterns following collector conventions
+- Support for retry-after headers in HTTP scenarios
+
+**consumererror Classification**:
+
+The translation process applies collector-standard error classification:
+
+- Permanent errors automatically wrapped with `consumererror.NewPermanent()`
+- Specific gRPC codes (InvalidArgument, Unauthenticated, PermissionDenied, Unimplemented) force permanent classification
+- Retryable errors return as standard Go errors for normal retry processing
+- Error context preservation for debugging and observability
 
 ## Integration with otap-dataflow
 
 ### Context-Aware Processor Pattern
 
-```rust
-// Enhanced processor trait with context propagation
-#[async_trait]
-pub trait ContextAwareProcessor<PData> {
-    async fn process_with_context(
-        &mut self,
-        msg: Message<PData>,
-        effect_handler: &mut ContextAwareEffectHandler<PData>,
-    ) -> Result<(), ProcessingError>;
-}
+Phase 5 enhances existing otap-dataflow processor patterns with context propagation and timeout support:
 
-// Example batch processor with context integration
-pub struct ContextAwareBatchProcessor {
-    config: BatchProcessorConfig,
-    pending_batches: HashMap<String, Vec<PData>>,
-}
+**Enhanced Processor Interface**:
 
-#[async_trait]
-impl ContextAwareProcessor<OTLPData> for ContextAwareBatchProcessor {
-    async fn process_with_context(
-        &mut self,
-        msg: Message<OTLPData>,
-        effect_handler: &mut ContextAwareEffectHandler<OTLPData>,
-    ) -> Result<(), ProcessingError> {
-        match msg {
-            Message::PData(data) => {
-                // Check if context is still valid
-                if let Some(context) = &effect_handler.context {
-                    if context.has_deadline {
-                        let now = SystemTime::now().duration_since(SystemTime::UNIX_EPOCH)
-                            .unwrap().as_secs() as i64;
-                        if now > context.deadline_unix {
-                            return Err(ProcessingError::Timeout { deadline: context.deadline_unix });
-                        }
-                    }
-                }
-                
-                // Add to batch
-                self.add_to_batch(data);
-                
-                // Check if batch is ready to flush
-                if self.should_flush() {
-                    // Use timeout-aware send
-                    effect_handler.send_message_with_timeout(batch_data).await
-                        .map_err(|e| ProcessingError::retryable(format!("Batch send failed: {}", e)))?;
-                }
-                
-                Ok(())
-            }
-            Message::Control(ControlMsg::Shutdown { .. }) => {
-                // Flush remaining data with cancellation support
-                self.flush_all(effect_handler).await
-            }
-            _ => Ok(())
-        }
-    }
-    
-    async fn flush_all(&mut self, effect_handler: &mut ContextAwareEffectHandler<OTLPData>) -> Result<(), ProcessingError> {
-        for (_, batch) in self.pending_batches.drain() {
-            // Use select! to respect cancellation during shutdown
-            tokio::select! {
-                result = effect_handler.send_message_with_timeout(batch) => {
-                    result.map_err(|e| ProcessingError::retryable(format!("Flush failed: {}", e)))?;
-                }
-                _ = effect_handler.cancel_token.as_mut().unwrap().cancelled() => {
-                    return Err(ProcessingError::Cancelled {
-                        reason: "Shutdown cancelled by Go runtime".to_string(),
-                    });
-                }
-            }
-        }
-        Ok(())
-    }
-}
-```
+- Extended processor trait includes context-aware EffectHandler parameter
+- Automatic context validation before processing operations
+- Timeout checking and deadline enforcement during batch operations
+- Cancellation support for long-running processing tasks
+
+**Batch Processing with Context**:
+
+Example batch processor demonstrates context integration patterns:
+
+- Context deadline checking before adding items to batches
+- Timeout-aware batch flushing with cancellation support
+- Graceful shutdown with context-aware cleanup operations
+- Select-based coordination between data processing and cancellation events
+
+**Shutdown and Cleanup**:
+
+- Context cancellation during shutdown triggers immediate cleanup
+- Remaining data flushed with timeout awareness
+- Resource cleanup respects cancellation deadlines
+- Error propagation during shutdown follows structured error patterns
 
 ### Select Statement Integration
 
-Phase 5 enables Go-style `select` patterns for coordinating between Go context events and Rust async operations:
+Phase 5 enables Go-style coordination between Go context events and Rust async operations:
 
-```go
-// processTracesWithContext demonstrates select-based coordination
-func (p *rustTracesProcessor) processTracesWithContext(
-    ctx context.Context, 
-    traces ptrace.Traces,
-) error {
-    // Extract context for Rust
-    contextTransfer, cancelFunc := extractContextTransfer(ctx)
-    defer cancelFunc()
-    
-    tracesJSON, _ := ptrace.NewJSONMarshaler().MarshalTraces(traces)
-    
-    // Create result channel for rust2go async call
-    resultChan := make(chan *ErrorTransfer, 1)
-    
-    // Start async Rust processing (rust2go marshals contextTransfer directly)
-    go func() {
-        errorTransfer := callRustProcessTraces(contextTransfer, string(tracesJSON))
-        resultChan <- errorTransfer
-    }()
-    
-    // Use select to coordinate Go context and Rust completion
-    select {
-    case <-ctx.Done():
-        // Context cancelled - signal Rust and wait briefly for cleanup
-        globalCancelRegistry.Cancel(contextTransfer.CancelTokenID)
-        
-        select {
-        case errorTransfer := <-resultChan:
-            // Rust completed quickly, return its result
-            return translateRustError(errorTransfer)
-        case <-time.After(100 * time.Millisecond):
-            // Rust didn't complete, return cancellation error
-            return ctx.Err()
-        }
-        
-    case errorTransfer := <-resultChan:
-        // Rust processing completed normally
-        return translateRustError(errorTransfer)
-        
-    case <-time.After(30 * time.Second):
-        // Fallback timeout (should not happen with proper context deadline)
-        globalCancelRegistry.Cancel(contextTransfer.CancelTokenID)
-        return fmt.Errorf("rust processing timeout")
-    }
-}
-```
+**Context Coordination Strategy**:
+
+- Go `select` statements coordinate between context cancellation and Rust completion
+- Immediate cancellation signaling to Rust when Go context is cancelled
+- Graceful timeout handling with brief cleanup periods
+- Result channel coordination for async rust2go operations
+
+**Processing Flow Pattern**:
+
+The integration follows a standard pattern for all processing operations:
+
+1. **Context Extraction**: Go context information extracted and prepared for rust2go transfer
+2. **Async Initiation**: Rust processing started with context information via rust2go
+3. **Select Coordination**: Go select statement monitors context cancellation and Rust completion
+4. **Result Translation**: Rust error transfers translated to appropriate Go error types
+5. **Cleanup**: Cancellation tokens and resources cleaned up regardless of outcome
+
+**Timeout and Cancellation Handling**:
+
+- Context cancellation triggers immediate Rust notification
+- Brief cleanup periods allow Rust operations to complete gracefully
+- Fallback timeouts prevent hanging operations when Rust doesn't respond quickly
+- Error translation preserves cancellation context for proper error reporting
 
 ## gRPC and HTTP Metadata Conventions
 
 ### Client Metadata Integration
 
-Phase 5 preserves the existing `client.Metadata` patterns established in the collector:
+Phase 5 preserves existing collector `client.Metadata` patterns while making them accessible in Rust:
 
-```rust
-// Rust metadata access following collector conventions
-impl<PData> ContextAwareEffectHandler<PData> {
-    // Get metadata value following client.Metadata.Get() pattern
-    pub fn get_metadata(&self, key: &str) -> Vec<String> {
-        self.metadata()
-            .and_then(|m| m.get(&key.to_lowercase()))
-            .cloned()
-            .unwrap_or_default()
-    }
-    
-    // Check for host header (following gRPC/HTTP conventions)
-    pub fn host(&self) -> Option<String> {
-        self.get_metadata("host")
-            .or_else(|| self.get_metadata(":authority"))
-            .into_iter()
-            .next()
-    }
-    
-    // Extract authentication information
-    pub fn authorization(&self) -> Option<String> {
-        self.get_metadata("authorization")
-            .into_iter()
-            .next()
-    }
-    
-    // User agent information
-    pub fn user_agent(&self) -> Option<String> {
-        self.get_metadata("user-agent")
-            .into_iter()
-            .next()
-    }
-}
-```
+**Metadata Access Patterns**:
+
+- Helper methods provide access to propagated client metadata following collector conventions
+- Case-insensitive key lookup matching existing `client.Metadata.Get()` behavior
+- Support for multi-value headers with proper value ordering
+- Standard header extraction for host, authorization, and user-agent information
+
+**gRPC Convention Compliance**:
+
+- Authority header handling for gRPC-style host information (`:authority` pseudo-header)
+- Authorization header processing for authentication information
+- User-agent preservation for client identification
+- Custom metadata preservation with proper key/value mapping
+
+**HTTP Header Integration**:
+
+- Standard HTTP headers accessible through consistent interface
+- Header case normalization following HTTP/gRPC conventions
+- Multi-value header support for headers allowing multiple values
+- Integration with existing collector HTTP receiver patterns
 
 ### Error Code Mappings
 
-Phase 5 follows the established error code mappings from `receiver/otlpreceiver/internal/errors`:
+Phase 5 follows established error code mappings from the collector's existing error handling infrastructure:
 
-```rust
-impl ProcessingError {
-    // Map to gRPC codes following collector conventions
-    pub fn to_grpc_status(&self) -> i32 {
-        match self {
-            // Permanent errors
-            ProcessingError::Configuration { .. } => 3,  // InvalidArgument
-            ProcessingError::Permanent { grpc_code: Some(code), .. } => *code,
-            ProcessingError::Permanent { .. } => 13,     // Internal
-            
-            // Retryable errors  
-            ProcessingError::Timeout { .. } => 4,        // DeadlineExceeded
-            ProcessingError::Cancelled { .. } => 1,      // Cancelled
-            ProcessingError::ResourceExhausted { .. } => 8, // ResourceExhausted
-            ProcessingError::Retryable { grpc_code: Some(code), .. } => *code,
-            ProcessingError::Retryable { .. } => 14,     // Unavailable
-        }
-    }
-    
-    // Map to HTTP status codes following collector conventions
-    pub fn to_http_status(&self) -> u16 {
-        match self {
-            ProcessingError::Configuration { .. } => 400,       // Bad Request
-            ProcessingError::Permanent { .. } => 500,           // Internal Server Error
-            ProcessingError::Timeout { .. } => 504,             // Gateway Timeout
-            ProcessingError::Cancelled { .. } => 499,           // Client Closed Request
-            ProcessingError::ResourceExhausted { .. } => 429,   // Too Many Requests
-            ProcessingError::Retryable { .. } => 503,          // Service Unavailable
-        }
-    }
-}
-```
+**gRPC Status Code Mappings**:
+
+- **Configuration Errors**: `InvalidArgument` (3) for malformed configuration
+- **Permanent Errors**: `Internal` (13) unless specific code provided
+- **Timeout Errors**: `DeadlineExceeded` (4) for context deadline violations
+- **Cancellation Errors**: `Cancelled` (1) for context cancellation
+- **Resource Exhaustion**: `ResourceExhausted` (8) for rate limiting
+- **Retryable Errors**: `Unavailable` (14) unless specific code provided
+
+**HTTP Status Code Mappings**:
+
+- **Configuration Errors**: 400 (Bad Request) for invalid configuration
+- **Permanent Errors**: 500 (Internal Server Error) for processing failures
+- **Timeout Errors**: 504 (Gateway Timeout) for deadline violations
+- **Cancellation Errors**: 499 (Client Closed Request) for cancellation
+- **Resource Exhaustion**: 429 (Too Many Requests) for rate limiting
+- **Retryable Errors**: 503 (Service Unavailable) for temporary failures
+
+**Collector Integration**:
+
+The mappings follow patterns in `receiver/otlpreceiver/internal/errors` and integrate with existing error handling, ensuring consistent error behavior across Go and Rust components.
 
 ## Performance Considerations
 
 ### Marshaling Strategy
 
-1. **rust2go Structs**: Primary approach for simple context and error data structures
-2. **JSON Fallback**: Used when rust2go marshaling proves difficult for complex scenarios
-3. **Context Caching**: Context transfers are cached and reused when context hasn't changed
-4. **Lazy Deserialization**: Rust components only access context fields they actually use
+Phase 5 employs a performance-optimized approach to cross-runtime data transfer:
+
+**Primary Strategy: rust2go Struct Marshaling**:
+
+- Direct struct marshaling for simple context and error data structures
+- Minimal serialization overhead through native rust2go type mapping
+- Automatic field mapping without manual serialization/deserialization
+- Type-safe marshaling with compile-time validation
+
+**Fallback Strategy: JSON Serialization**:
+
+- Used only when rust2go marshaling proves difficult for complex metadata scenarios
+- Graceful degradation with minimal context information when JSON parsing fails
+- Cached JSON serialization for repeated context transfers
+- Structured error handling for serialization failures
+
+**Context Optimization**:
+
+- Context transfers cached and reused when context information unchanged
+- Lazy deserialization where Rust components only access needed context fields
+- String interning for common metadata keys and error messages
+- Minimal context structure with only essential information
 
 ### Memory Management
 
-1. **String Interning**: Common metadata keys and error messages use string interning
-2. **Context Cleanup**: Cancellation tokens are automatically cleaned up after use
-3. **Error Allocation**: Processing errors use stack allocation where possible
+**Automatic Resource Cleanup**:
+
+- Cancellation tokens automatically cleaned up after use or cancellation
+- rust2go handle management ensures proper memory cleanup across boundaries
+- Context structures use stack allocation where possible in Rust
+- Error structures minimize heap allocation through precomputed fields
+
+**Memory Efficiency**:
+
+- Shared string storage for common error messages and metadata keys
+- Context caching reduces repeated allocations for similar requests
+- Cancellation channel sizing optimized for minimal memory overhead
+- Error transfer structures designed for minimal serialization size
 
 ### Async Integration
 
-1. **Non-blocking FFI**: All FFI calls use rust2go's async patterns to avoid blocking
-2. **Channel Sizing**: Cancellation channels use minimal buffer sizes
-3. **Select Efficiency**: Go select statements avoid unnecessary goroutine spawning
+**Non-blocking Operations**:
+
+- All FFI calls use rust2go's async patterns to avoid blocking Go runtime
+- Channel-based coordination between Go select statements and Rust async operations
+- Background cancellation monitoring with minimal goroutine overhead
+- Efficient channel sizing to prevent memory buildup during high throughput
+
+**Performance Targets**:
+
+- Overall metadata propagation overhead target: <5% for high-throughput scenarios
+- Context transfer latency: <100 microseconds for typical metadata sizes
+- Error translation overhead: <10 microseconds per error
+- Memory overhead: <1KB per active context transfer
 
 ## Migration Strategy
 
 ### Phase 5.1: Context Marshaling
 
-- Implement basic context transfer structures using rust2go marshaling
-- Add cancellation token management
-- Fallback to JSON for complex metadata scenarios
+**Foundation Implementation**:
+
+- Implement basic context transfer structures using rust2go's native marshaling capabilities
+- Add cancellation token management with cross-runtime coordination
+- Establish JSON fallback patterns for complex metadata scenarios that prove difficult for direct marshaling
+- Create helper functions for context extraction and validation
 
 ### Phase 5.2: Error Propagation
 
-- Implement structured error types in Rust with rust2go marshaling
-- Add Go error translation layer
-- Integrate with existing consumererror patterns
+**Structured Error System**:
+
+- Implement structured error types in Rust with comprehensive enum variants
+- Add rust2go marshaling support for error transfer structures
+- Create Go error translation layer with `consumererror` integration
+- Establish error code mapping following collector conventions
 
 ### Phase 5.3: EffectHandler Integration
 
-- Extend otap-dataflow EffectHandler with context awareness
-- Add timeout and cancellation support to send operations
-- Performance optimization and caching
+**Context-Aware Processing**:
+
+- Extend otap-dataflow EffectHandler with context awareness and timeout support
+- Add timeout and cancellation support to send operations with select-based coordination
+- Implement metadata and tracing access methods following collector patterns
+- Performance optimization with context caching and efficient async coordination
 
 ### Phase 5.4: Production Hardening
 
-- Comprehensive error handling coverage
-- Performance benchmarking and optimization
-- Production logging and debugging tools
+**Operational Excellence**:
+
+- Comprehensive error handling coverage with graceful degradation patterns
+- Performance benchmarking and optimization to meet <5% overhead target
+- Production logging and debugging tools for cross-runtime troubleshooting
+- Integration testing with realistic workloads and failure scenarios
 
 ## Connection to Previous Phases
 
 ### Phase 4 Integration
 
-- Builds on otap-dataflow EffectHandler patterns
-- Extends processor/exporter/receiver traits with context awareness
-- Maintains compatibility with existing factory patterns
+**otap-dataflow Foundation**:
+
+- Builds directly on Phase 4's otap-dataflow EffectHandler patterns for high-performance telemetry processing
+- Extends existing processor, exporter, and receiver traits with context awareness
+- Maintains full compatibility with existing factory patterns while adding context propagation
+- Preserves performance benefits of shared memory rings and batched operations
 
 ### Factory System Enhancement
 
-- Component factories pass context information during Create() calls
-- Error translation integrates with factory validation patterns
-- Cancellation tokens managed through component lifecycle
+**Lifecycle Integration**:
+
+- Component factories pass context information during Create() calls following established patterns
+- Error translation integrates seamlessly with factory validation patterns from Phase 2
+- Cancellation tokens managed through component lifecycle with proper resource cleanup
+- Context extraction and validation integrated with existing configuration validation flows
 
 ### Configuration Integration (Phase 2)
 
-- Context configuration becomes part of runtime config
-- Metadata parsing uses existing serde patterns
-- Error handling extends validation error patterns
+**Configuration Bridge Extension**:
+
+- Context configuration becomes part of runtime configuration through existing serde patterns
+- Metadata parsing leverages Phase 2's confmap ↔ serde integration for consistency
+- Error handling extends validation error patterns established in configuration bridge
+- Configuration-time context validation follows existing factory patterns
+
+**Build System Integration (Phase 1)**:
+
+- Context propagation patterns work with mixed Go/Rust components identified in Phase 1
+- Factory registration supports context-aware components with no changes to builder tool
+- Component discovery and compilation patterns remain unchanged with context enhancement
 
 ## Success Criteria
 
@@ -860,7 +470,6 @@ impl ProcessingError {
 - [ ] gRPC and HTTP error codes are preserved across runtime boundaries
 - [ ] Client metadata follows collector conventions and is accessible in Rust
 - [ ] Distributed tracing context flows seamlessly across Go/Rust boundary
-- [ ] Performance overhead is <5% for high-throughput telemetry processing
 - [ ] All timeout and cancellation scenarios work correctly under load
 
 This design provides a robust foundation for production telemetry processing with full observability and error handling across Go and Rust runtimes, building naturally on the collector's existing patterns while leveraging the performance benefits of the otap-dataflow engine.

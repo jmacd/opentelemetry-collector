@@ -8,128 +8,26 @@ Phase 4 integrates the OpenTelemetry Collector with the existing `otel-arrow/rus
 
 ### Factory Pattern Extension from Phase 3
 
-Phase 4 extends the factory pattern established in Phase 3 to pipeline components (processors, exporters, receivers). Each component type implements its specialized factory interface while maintaining the same core patterns:
+Phase 4 extends the factory pattern from Phase 3 to pipeline components (processors, exporters, receivers). Each component type implements its specialized factory interface while maintaining core patterns:
 
-**Processor Factory Implementation**:
-```go
-// ProcessorFactory implements processor.Factory
-type ProcessorFactory struct {
-    componentType component.Type
-    stability     component.StabilityLevel
-}
+**Processor Factory Design**:
 
-func NewProcessorFactory() processor.Factory {
-    return &ProcessorFactory{
-        componentType: component.MustNewType("rust_batch_processor"),
-        stability:     component.StabilityLevelDevelopment,
-    }
-}
+- Implements standard collector `processor.Factory` interface
+- Uses component type registration pattern from previous phases
+- Returns `RustComponentConfig` wrapper for configuration consistency
+- Creates Go wrapper components that bridge to otap-dataflow engine
+- Separates factory creation from component instantiation for lifecycle management
+- Supports all telemetry types (traces, metrics, logs) through specialized create methods
 
-// Type() returns component type for factory registration
-func (f *ProcessorFactory) Type() component.Type {
-    return f.componentType
-}
+**Rust Factory Registration Design**:
 
-// CreateDefaultConfig() returns Phase 2 configuration wrapper
-func (f *ProcessorFactory) CreateDefaultConfig() component.Config {
-    jsonPtr := C.rust_processor_default_config()
-    defer C.free_rust_string(jsonPtr)
-    
-    jsonStr := C.GoString(jsonPtr)
-    return &RustComponentConfig{rawJSON: jsonStr}
-}
+The Rust side uses compile-time registration to provide otap-dataflow components:
 
-// CreateTracesProcessor implements processor.Factory interface
-func (f *ProcessorFactory) CreateTracesProcessor(
-    ctx context.Context,
-    set processor.Settings,
-    cfg component.Config,
-    nextConsumer consumer.Traces,
-) (processor.Traces, error) {
-    rustCfg, ok := cfg.(*RustComponentConfig)
-    if !ok {
-        return nil, fmt.Errorf("invalid config type")
-    }
-    
-    // Create Go wrapper that will bridge to otap-dataflow
-    return &rustTracesProcessor{
-        id:           set.ID,
-        config:       rustCfg,
-        nextConsumer: nextConsumer,
-        factoryID:    0,  // Will be set during Start()
-        processorID:  0,  // Will be set during Start()
-    }, nil
-}
-
-// Similar implementations for CreateMetricsProcessor, CreateLogsProcessor
-```
-
-### Rust Factory Registration with otap-dataflow
-
-Rust factories use linkme registration to provide otap-dataflow components:
-
-```rust
-use linkme::distributed_slice;
-use otap_dataflow::shared::{Processor, EffectHandler};
-
-// Distributed slice for processor factory registration
-#[distributed_slice]
-pub static RUST_PROCESSORS: [&'static dyn ProcessorFactory] = [..];
-
-pub trait ProcessorFactory: Send + Sync {
-    fn component_type(&self) -> &'static str;
-    fn create_default_config(&self) -> String;
-    fn validate_config(&self, config_json: &str) -> Result<(), String>;
-    
-    // Create otap-dataflow processor instance
-    fn create_processor(&self, config: &str) -> Result<Box<dyn Processor<PData>>, String>;
-}
-
-// Factory registration using linkme
-#[distributed_slice(RUST_PROCESSORS)]
-static BATCH_PROCESSOR_FACTORY: &'static dyn ProcessorFactory = &BatchProcessorFactory;
-
-pub struct BatchProcessorFactory;
-
-impl ProcessorFactory for BatchProcessorFactory {
-    fn component_type(&self) -> &'static str {
-        "rust_batch_processor"
-    }
-    
-    fn create_default_config(&self) -> String {
-        let config = BatchProcessorConfig::default();
-        serde_json::to_string(&config).unwrap_or_else(|_| "{}".to_string())
-    }
-    
-    fn validate_config(&self, config_json: &str) -> Result<(), String> {
-        let config: BatchProcessorConfig = serde_json::from_str(config_json)
-            .map_err(|e| format!("serde parse error: {}", e))?;
-        config.validate()
-    }
-    
-    fn create_processor(&self, config: &str) -> Result<Box<dyn Processor<PData>>, String> {
-        let config: BatchProcessorConfig = serde_json::from_str(config)?;
-        
-        // Create otap-dataflow processor with EffectHandler
-        let processor = BatchProcessor::new(config)?;
-        Ok(Box::new(processor))
-    }
-}
-
-// BatchProcessor implements otap-dataflow Processor trait
-pub struct BatchProcessor {
-    config: BatchProcessorConfig,
-    effect_handler: Option<Box<dyn EffectHandler<PData>>>,
-}
-
-impl Processor<PData> for BatchProcessor {
-    async fn process(&mut self, data: PData, effect_handler: &mut dyn EffectHandler<PData>) -> Result<(), ProcessingError> {
-        // Implementation uses otap-dataflow patterns
-        // Process arrow record batches using batch configuration
-        // Send results through effect_handler for next component
-    }
-}
-```
+- Uses linkme crate for distributed slice registration at link time
+- Defines factory traits with methods for component type identification, default configuration, validation, and processor creation
+- Implements specific factory types (like BatchProcessorFactory) that create otap-dataflow processor instances
+- Components implement the otap-dataflow Processor trait and use EffectHandler for runtime interaction
+- Factory registration allows automatic discovery of available processor types at build time
 
 ### Factory Integration Across All Phases
 
@@ -141,6 +39,7 @@ The factory architecture provides a consistent foundation across all phases:
 4. **Phase 4**: Pipeline factories extend the pattern to processors/exporters/receivers with otap-dataflow
 
 Each phase builds on the factory foundations:
+
 - **Configuration consistency**: All factories use `RustComponentConfig` wrapper from Phase 2
 - **Lifecycle patterns**: All factories separate Create() from Start() as established in Phase 3  
 - **Registration uniformity**: Rust linkme static registration complements Go manual registration
@@ -149,13 +48,15 @@ Each phase builds on the factory foundations:
 ## Core Integration Strategy
 
 ### Target Architecture: otap-dataflow Bridge
+
 Phase 4 creates a translation layer between:
 
-```
+```text
 Go Collector Interfaces ↔ rust2go FFI ↔ otap-dataflow Engine
 ```
 
 **Key Insight**: Instead of inventing new traits, leverage the existing otap-dataflow component system:
+
 - **Processors**: `shared::Processor<PData>` containing `EffectHandler<PData>` for runtime interaction
 - **Exporters**: `shared::Exporter<PData>` containing `EffectHandler<PData>` for runtime interaction
 - **Receivers**: `shared::Receiver<PData>` containing `EffectHandler<PData>` for runtime interaction
@@ -165,18 +66,23 @@ Go Collector Interfaces ↔ rust2go FFI ↔ otap-dataflow Engine
 The essential work is translating between consumer interfaces:
 
 **Go Side (pdata → bytes)**:
+
 - `consumer.Traces.ConsumeTraces(pdata.Traces)` → OTLP bytes
 - `consumer.Logs.ConsumeLogs(pdata.Logs)` → OTLP bytes  
 - `consumer.Metrics.ConsumeMetrics(pdata.Metrics)` → OTLP bytes
 
 **Rust Side (bytes → OTAP)**:
+
 - OTLP bytes → Arrow record batches (OTAP format)
 - Feed into otap-dataflow `Processor<PData>`/`Exporter<PData>`/`Receiver<PData>` components
-- Components use their `EffectHandler<PData>` for runtime interaction (Send vs !Send choice)
+- Components use their `EffectHandler<PData>` for runtime interaction
 
 ## Rust Runtime Configuration
 
-### Configuration Structure
+The runtime configuration manages the Rust execution environment and rust2go communication:
+
+**Configuration Structure**:
+
 ```yaml
 rust_runtime:
   executor:
@@ -185,197 +91,68 @@ rust_runtime:
     queue_size: 65536    # Shared memory ring buffer size
 ```
 
-### Implementation
-```rust
-#[derive(Deserialize, Serialize)]
-pub struct RustRuntimeConfig {
-    #[serde(default)]
-    pub executor: ExecutorConfig,
-    #[serde(default)]
-    pub rust2go: Rust2goConfig,
-}
+**Implementation Details**:
 
-#[derive(Deserialize, Serialize)]
-pub struct ExecutorConfig {
-    pub executor_type: String,
-}
-
-#[derive(Deserialize, Serialize)]
-pub struct Rust2goConfig {
-    pub queue_size: usize,
-}
-
-impl Default for RustRuntimeConfig {
-    fn default() -> Self {
-        Self {
-            executor: ExecutorConfig::default(),
-            rust2go: Rust2goConfig::default(),
-        }
-    }
-}
-
-impl Default for ExecutorConfig {
-    fn default() -> Self {
-        Self {
-            executor_type: "tokio_local".to_string(),
-        }
-    }
-}
-
-impl Default for Rust2goConfig {
-    fn default() -> Self {
-        Self {
-            queue_size: 65536,
-        }
-    }
-}
-
-pub fn default_config() -> RustRuntimeConfig {
-    RustRuntimeConfig::default()
-}
-```
+- Uses standard serde patterns with default values
+- **Executor Configuration**: Manages async runtime setup (tokio_local by default)  
+- **Rust2go Configuration**: Controls shared memory buffer sizes for efficient cross-language communication
+- **Default Values**: Provides sensible defaults for all configuration options
 
 ## otap-dataflow Integration Architecture
 
 ### Factory Traits
 
-For the interaction between Rust and Go, each pipeline component will have a 
-corresponding bridge. The example below is for the processor interface, and
-we expect to have a similar bridge for the other components.
+For interaction between Rust and Go, each pipeline component has a corresponding bridge. The processor interface example demonstrates the pattern for all component types.
 
-Note that the on the Rust side, we use the [linkme crate](https://docs.rs/linkme/latest/linkme/) to 
-register factories at link time.
+The Rust side uses the [linkme crate](https://docs.rs/linkme/latest/linkme/) to register factories at link time.
 
-```rust
-#[rust2go::r2g] // Queue size configured via runtime config
-pub trait Rust2goProcessorBridge {
-    #[mem]
-    async fn new_processor_factory(
-        &mut self,
-    ) -> Result<u64, String>; // Returns factory handle ID
-    
-    #[mem]
-    async fn create_traces_processor(
-        &mut self,
-        factory_id: u64,
-        config: &[u8],        // Component configuration (JSON)
-    ) -> Result<u64, String>; // Returns traces processor instance handle ID
-    
-    #[mem]
-    async fn create_metrics_processor(
-        &mut self,
-        factory_id: u64,
-        config: &[u8],        // Component configuration (JSON)
-    ) -> Result<u64, String>; // Returns metrics processor instance handle ID
-    
-    #[mem]
-    async fn create_logs_processor(
-        &mut self,
-        factory_id: u64,
-        config: &[u8],        // Component configuration (JSON)
-    ) -> Result<u64, String>; // Returns logs processor instance handle ID
-    
-    #[mem] 
-    async fn process_traces(
-        &mut self,
-        processor_id: u64,
-        traces_data: &[u8],   // OTLP traces protobuf data
-    ) -> Result<(), Error>;   // Structured error handling
-    
-    #[mem] 
-    async fn process_metrics(
-        &mut self,
-        processor_id: u64,
-        metrics_data: &[u8],  // OTLP metrics protobuf data
-    ) -> Result<(), Error>;   // Structured error handling
-    
-    #[mem] 
-    async fn process_logs(
-        &mut self,
-        processor_id: u64,
-        logs_data: &[u8],     // OTLP logs protobuf data
-    ) -> Result<(), Error>;   // Structured error handling
-}
-```
+**Key Bridge Operations**:
+
+- **Factory Management**: Create and register factory instances with runtime configuration
+- **Component Creation**: Instantiate processors for specific telemetry types (traces, metrics, logs)
+- **Data Processing**: Convert OTLP protobuf to otap-dataflow format and process through components
+- **Error Handling**: Structured error types for conversion, processing, and handle management
+- **Handle Management**: Use numeric handles to reference factory and component instances across language boundaries
+
+**Implementation Approach**:
+
+- Use rust2go traits with memory-based communication for efficient data transfer
+- Parse runtime and component configurations using serde JSON handling
+- Leverage distributed slice registration to discover available factories by name
+- Convert OTLP protobuf data to otap-dataflow message format for processing
+- Create EffectHandlers for each processing operation to manage component interactions
 
 ### Factory Integration
-```rust
-impl Rust2goProcessorBridge for Rust2goBridgeImpl {
-    async fn create_processor_factory(&mut self, name: &str, runtime_config: &[u8]) -> Result<u64, String> {
-        // Parse runtime configuration
-        let runtime_cfg: RustRuntimeConfig = serde_json::from_slice(runtime_config)
-            .map_err(|e| format!("runtime config parse error: {}", e))?;
-            
-        // Find factory in the distributed slice by name
-        let factory = SHARED_PROCESSORS.iter()
-            .find(|f| f.name == name)
-            .ok_or_else(|| format!("processor factory not found: {}", name))?;
-            
-        // Store factory reference and return handle
-        let factory_id = register_factory(factory.clone(), &runtime_cfg)?;
-        Ok(factory_id)
-    }
-    
-    async fn create_traces_processor(&mut self, factory_id: u64, config: &[u8]) -> Result<u64, String> {
-        // Get factory from handle
-        let factory = get_factory_by_id(factory_id)
-            .ok_or_else(|| "invalid factory handle".to_string())?;
-            
-        // Parse component configuration
-        let component_config: serde_json::Value = serde_json::from_slice(config)
-            .map_err(|e| format!("component config parse error: {}", e))?;
-            
-        // Create processor instance using factory (specialized for traces)
-        let processor = (factory.create)(&component_config);
-        
-        // Register as traces processor and return handle
-        let processor_id = register_traces_processor(processor)?;
-        Ok(processor_id)
-    }
-    
-    async fn create_metrics_processor(&mut self, factory_id: u64, config: &[u8]) -> Result<u64, String> {
-        ...
-    }
-    
-    async fn create_logs_processor(&mut self, factory_id: u64, config: &[u8]) -> Result<u64, String> {
-        ...
-    }
-    
-    async fn process_traces(&mut self, processor_id: u64, traces_data: &[u8]) -> Result<(), Error> {
-        // Get traces processor by handle
-        let processor = get_traces_processor_by_id_mut(processor_id)
-            .ok_or_else(|| Error::InvalidHandle(processor_id))?;
-            
-        // Convert OTLP traces protobuf to otap-dataflow format
-        let traces_message = convert_otlp_traces_to_dataflow_message(traces_data)
-            .map_err(|e| Error::ConversionError(format!("traces conversion error: {}", e)))?;
-        
-        // Create EffectHandler for this processing operation
-        let mut effect_handler = create_effect_handler_for_processing()
-            .map_err(|e| Error::ProcessingError(format!("effect handler creation error: {}", e)))?;
-        
-        // Process via otap-dataflow Processor trait
-        processor.process(traces_message, &mut effect_handler)
-            .await
-            .map_err(|e| Error::ProcessingError(format!("traces processing error: {}", e)))?;
-            
-        // Processing complete - data flows through EffectHandler to next component
-        Ok(())
-    }
-    
-    async fn process_metrics(&mut self, processor_id: u64, metrics_data: &[u8]) -> Result<(), Error> {
-        ... 
-    }
-    
-    async fn process_logs(&mut self, processor_id: u64, logs_data: &[u8]) -> Result<(), Error> {
-        ...
-    }
-}
-```
+
+The factory integration handles the lifecycle from factory registration through data processing:
+
+**Factory Registration Process**:
+
+- Parse runtime configuration using serde JSON handling
+- Find registered factories in distributed slices by component name
+- Store factory references with runtime configuration and return handle IDs
+
+**Component Creation Process**:
+
+- Retrieve factory instances using handle IDs
+- Parse component-specific configuration from JSON bytes
+- Create processor instances specialized for telemetry types (traces, metrics, logs)
+- Register component instances and return processor handle IDs
+
+**Data Processing Flow**:
+
+- Retrieve processor instances using handle IDs
+- Convert OTLP protobuf data to otap-dataflow message format
+- Create EffectHandler instances for processing operations
+- Execute processing through otap-dataflow Processor trait
+- Handle structured errors for conversion, processing, and handle management
+
+This approach provides type-safe, efficient communication between Go and Rust while leveraging the proven otap-dataflow architecture for high-performance telemetry processing.
 
 ## Data Format Translation
 
 ### pdata ↔ OTAP Bridge
+
 The key technical challenge is efficient conversion between formats:
 
 1. **Go pdata → OTLP protobuf**: Use existing collector serialization
@@ -386,12 +163,16 @@ The key technical challenge is efficient conversion between formats:
 ## Implementation Phases
 
 ### 4.1: Consumer Interface Bridge
+
 **Priority**: Create translation layer for consumer interfaces
+
 - Create rust2go traits that wrap otap-dataflow components
 - Extend Phase 3 lifecycle patterns: create `otap-dataflow` components using that crate's abstractions
 
 ### 4.2: Component Implementation
+
 **Priority**: Implement specific component types using otap-dataflow
+
 - **Processors**: Use `shared::Processor<PData>` with contained `EffectHandler<PData>`
 - **Exporters**: Use `shared::Exporter<PData>` with contained `EffectHandler<PData>`
 - **Receivers**: Use `shared::Receiver<PData>` with contained `EffectHandler<PData>`
@@ -406,7 +187,8 @@ Phase 4 builds directly on established foundations:
 ## Scope Boundaries
 
 **In Scope**:
-- Receiver, Exporter, Processor compnents (receiver.Factory, exporter.Factory, processor.Factory, ...)
+
+- Receiver, Exporter, Processor components (receiver.Factory, exporter.Factory, processor.Factory, ...)
 - Consumer interface translation (consumer.Traces, consumer.Logs, consumer.Metrics, ...)
 - Integration with existing otap-dataflow components for OTLP pdata (Go) to OTAP pdata (Rust)
 - Runtime configuration for Rust execution environment using `otap-dataflow`

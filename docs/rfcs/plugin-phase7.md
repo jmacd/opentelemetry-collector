@@ -2,58 +2,62 @@
 
 ## Overview
 
-Phase 7 introduces dynamic plugin support for both Go and Rust components in the OpenTelemetry Collector. This enables runtime extensibility, allowing new components to be loaded without recompiling the main binary. The design must ensure safety, compatibility, and hermeticity, given the challenges of dynamic linking in both languages.
+Phase 7 introduces dynamic plugin support for Go and Rust components in the OpenTelemetry Collector. This enables runtime extensibility—loading new components without recompiling the main binary. The design ensures safety, compatibility, and hermeticity despite dynamic linking challenges.
 
 ## Design Goals
 
-1. **Dynamic Extensibility**: Load Go and Rust components as plugins at runtime.
-2. **Hermetic Builds**: Guarantee that plugins and the main binary are built with exactly matching dependencies, compiler versions, and build flags.
-3. **Version Safety**: Prevent runtime crashes or undefined behavior due to mismatched versions or ABIs.
-4. **Cross-Language Support**: Support plugins written in both Go and Rust, with idiomatic loading and registration patterns.
-5. **Distribution Verification**: Provide manifest and artifact verification to ensure plugin compatibility before loading.
+1. **Dynamic Extensibility**: Load Go and Rust components as plugins at runtime
+2. **Hermetic Builds**: Guarantee plugins and main binary use identical dependencies, compiler versions, and build flags
+3. **Version Safety**: Prevent runtime crashes from mismatched versions or ABIs
+4. **Cross-Language Support**: Support plugins in both Go and Rust with idiomatic loading patterns
+5. **Distribution Verification**: Verify plugin compatibility before loading via manifest and artifact checks
 
 ## Go Plugin System
 
-- Use Go's native `plugin` package (`-buildmode=plugin`) to build shared libraries.
-- Plugins must be built with the exact same Go version, module versions, and build flags as the main Collector binary.
+- Uses Go's native plugin package with plugin build mode for shared libraries
+- Plugins must use identical Go version, module versions, and build flags as the main binary
 - The builder will:
-  - Generate a manifest (e.g., JSON or YAML) describing the Go version, module hashes, and build flags.
-  - Embed this manifest in both the main binary and each plugin.
-  - At runtime, the Collector will verify the manifest before loading a plugin.
-- Plugins will export a known symbol (e.g., `CollectorPluginInit`) for registration.
+  - Generate manifests describing Go version, module hashes, and build flags (JSON/YAML)
+  - Embed manifests in both main binary and plugins
+  - Verify manifests at runtime before loading plugins
+- Plugins export a known registration symbol following standard naming conventions
 
 **Caveats:**
-- Go plugins are only supported on Linux and macOS, not Windows.
-- All dependencies must be statically linked (in each plugin) and version-matched.
+- Go plugins only supported on Linux and macOS, not Windows
+- All dependencies must be statically linked and version-matched
 
 ## Rust Plugin System
 
-- Use Cargo to build shared libraries (`cdylib`), loaded via `dlopen()` and `dlsym()`.
-- Rust plugins must be built with the exact same Rust version, crate versions, and Cargo settings as the main binary.
+- Uses Cargo to build shared libraries as cdylib crates, loaded via dynamic linking
+- Plugins must use identical Rust version, crate versions, and Cargo settings as the main binary
 - The builder will:
-  - Generate a manifest (e.g., TOML or JSON) with Rust version, crate hashes, and build flags.
-  - Embed this manifest in both the main binary and each plugin (e.g., as a section or exported symbol).
-  - At runtime, the Collector will verify the manifest before loading a plugin.
-- Plugins will export a C-compatible registration function (e.g., `register_collector_plugin`).
+  - Generate manifests with Rust version, crate hashes, and build flags (TOML/JSON)
+  - Embed manifests in both main binary and plugins as sections or exported symbols
+  - Verify manifests at runtime before loading plugins
+- Plugins export C-compatible registration functions following standard FFI conventions
 
 **Caveats:**
-- Rust has no stable ABI; all FFI boundaries must use C-compatible types.
-- All dependencies must be version-matched and statically linked.
+
+- Rust has no stable ABI; all FFI boundaries must use C-compatible types
+- All dependencies must be version-matched and statically linked
 
 ## Hermetic Build & Distribution
 
-- The builder will support a "hermetic" build mode:
-  - Use Docker to encapsulate the build environment (compiler versions, OS, etc.).
-  - The Dockerfile will be generated or versioned alongside the distribution.
-  - All plugins and the main binary are built in the same container, ensuring identical environments.
-  - The build process will output:
-    - The main Collector binary
-    - Plugin shared libraries
-    - Version manifests for each artifact (see manifest schema below)
-    - The Dockerfile or a hash of the build environment
-- At runtime, the Collector will:
-  - Refuse to load plugins with mismatched manifests.
-  - Provide CLI commands to verify plugin compatibility and inspect plugin metadata before loading.
+The builder supports "hermetic" build mode:
+
+- Uses Docker to encapsulate build environment (compiler versions, OS, etc.)
+- Dockerfile is generated or versioned alongside the distribution
+- All plugins and main binary built in the same container for identical environments
+- Build process outputs:
+  - Main Collector binary
+  - Plugin shared libraries
+  - Version manifests for each artifact
+  - Dockerfile or build environment hash
+
+At runtime, the Collector will:
+
+- Refuse to load plugins with mismatched manifests
+- Provide CLI commands to verify plugin compatibility and inspect metadata
 
 ## Unified Plugin Manifest Schema
 
@@ -74,54 +78,56 @@ Both Go and Rust plugins will embed a manifest with the following structure (JSO
 }
 ```
 
-- For Go, fill `toolchain_version` with `go version`, and `dependency_hashes` with module hashes.
-- For Rust, fill `toolchain_version` with `rustc --version`, and `dependency_hashes` with crate hashes.
-- The manifest is exported as a symbol (e.g., `collector_plugin_manifest`) for Rust, and embedded in Go binaries/plugins for extraction.
+- For Go: toolchain_version contains Go version output; dependency_hashes contains module hashes
+- For Rust: toolchain_version contains Rust compiler version output; dependency_hashes contains crate hashes
+- Manifest exported as named symbol for Rust plugins, embedded in Go binaries/plugins for extraction
 
 ## CLI Plugin Probing and Introspection
 
-The Collector CLI will provide commands to help users and CI/CD systems inspect and validate plugins:
+The Collector CLI provides commands for plugin inspection and validation:
 
-- `otelcol plugins list` — List all plugins in the configured directory, showing manifest info (language, version, hashes, etc.).
-- `otelcol plugins validate <plugin.so>` — Load the plugin, extract and print its manifest, and check for compatibility with the main binary.
-- `otelcol plugins inspect <plugin.so>` — Print detailed manifest and exported symbols, without loading the plugin into the main process.
-- `otelcol plugins check-all` — Validate all plugins in the directory, reporting any mismatches or issues.
+- **List plugins**: Display all plugins in configured directory with manifest info (language, version, hashes)
+- **Validate plugin**: Load specific plugin, extract manifest, check compatibility with main binary
+- **Inspect plugin**: Print detailed manifest and exported symbols without loading into main process
+- **Check all plugins**: Validate all plugins in directory, report mismatches or issues
 
-These commands allow safe, transparent plugin management and can be used in automation.
+These commands enable safe, transparent plugin management for automation.
 
 ## Component Introspection and Documentation
 
-The Collector CLI will also support commands for built-in and plugin components:
+The Collector CLI supports commands for built-in and plugin components:
 
-- `otelcol components` — List all built-in and plugin components, their types, modules, and stability levels.
-- `otelcol components explain <type>` — Show configuration schema and documentation for a component.
-- `otelcol components default-config <type>` — Print the default config for a component.
-- `otelcol components list --plugins` — List only plugin components.
+- **List components**: Display all components with types, modules, and stability levels
+- **Explain component**: Show configuration schema and documentation for specific component type
+- **Default configuration**: Print default configuration for component type
+- **List plugin components**: Display only plugin components, filtering out built-in ones
 
-This enables users to discover, understand, and validate all available components, regardless of origin.
+This enables component discovery, understanding, and validation regardless of origin.
 
 
 ## Plugin Discovery & Registration
 
-- Plugins are discovered via a configured directory or manifest file.
-- On load, the Collector:
-  - Verifies the manifest.
-  - Loads the shared library.
-  - Calls the exported registration function to register new factories/components.
+Plugins are discovered via configured directory or manifest file. On load, the Collector:
+
+- Verifies the manifest
+- Loads the shared library
+- Calls exported registration function to register new factories/components
 
 
 ## Testing & Verification
 
-- Automated tests will:
-  - Build the Collector and plugins in a hermetic Docker environment.
-  - Attempt to load plugins with mismatched manifests (should fail).
-  - Load and use plugins with matching manifests (should succeed).
-- Manual and CLI verification tools will be provided to inspect plugin manifests, build environments, and component documentation.
+Automated tests will:
+
+- Build Collector and plugins in hermetic Docker environment
+- Attempt loading plugins with mismatched manifests (should fail)
+- Load and use plugins with matching manifests (should succeed)
+
+Manual and CLI verification tools inspect plugin manifests, build environments, and component documentation.
 
 ## Next Steps
 
-- Define manifest schema for both Go and Rust plugins.
-- Implement manifest embedding and verification logic.
-- Extend the builder to support Docker-based hermetic builds.
-- Implement plugin loading and registration logic in the Collector.
-- Document plugin development and distribution workflow.
+- Define manifest schema for Go and Rust plugins
+- Implement manifest embedding and verification logic
+- Extend builder to support Docker-based hermetic builds
+- Implement plugin loading and registration logic in Collector
+- Document plugin development and distribution workflow

@@ -2,7 +2,7 @@
 
 ## Overview
 
-Phase 6 provides a fallback architecture for scenarios where direct Go↔️Rust runtime integration (Phases 1-5) cannot be used. Instead of in-process FFI, this phase implements service graph partitioning where the collector spawns a subordinate Rust process and communicates via standard OTLP/gRPC over secure socketpairs.
+Phase 6 provides a fallback architecture when direct Go↔️Rust runtime integration (Phases 1-5) cannot be used. Instead of in-process FFI, this phase implements service graph partitioning where the collector spawns a subordinate Rust process and communicates via standard OTLP/gRPC over secure socket pairs.
 
 ## Integration with Previous Phases
 
@@ -32,41 +32,29 @@ exporters:
 
 **Build Mode Selection Logic:**
 
-```go
-// Phase 6 extends Phase 1's builder with mode detection
-func (d *Distribution) determineBuildMode() BuildMode {
-    switch d.SubprocessMode {
-    case "embedded":
-        return ModeEmbedded
-    case "subprocess": 
-        return ModeSubprocess
-    case "auto":
-        // Auto-detect based on build constraints, etc.
-        if os.Getenv("CGO_ENABLED") == "0" {
-            return ModeSubprocess
-        }
-        return ModeEmbedded
-    default:
-        return ModeEmbedded
-    }
-}
-```
+The builder automatically determines the appropriate mode based on the `subprocess_mode` setting:
+
+- `embedded`: Forces in-process FFI mode (requires CGO)
+- `subprocess`: Forces out-of-process mode via OTLP
+- `auto`: Automatically detects the best mode based on build constraints (uses subprocess mode when `CGO_ENABLED=0`)
 
 ### Phase 5 Context Propagation via OTLP
 
-Phase 6 leverages Phase 5's context propagation patterns, but through standard OTLP gRPC instead of rust2go FFI:
+Phase 6 leverages Phase 5's context propagation patterns through standard OTLP gRPC instead of rust2go FFI:
 
 - **Deadlines**: Automatic via gRPC context deadlines in OTLP calls
-- **Cancellation**: Automatic via gRPC stream cancellation  
+- **Cancellation**: Automatic via gRPC stream cancellation
 - **Metadata**: Phase 5's `client.Metadata` flows through gRPC headers
 - **Tracing**: OpenTelemetry trace context propagates via gRPC metadata
 - **Error Classification**: Phase 5's `ProcessingError` → gRPC status codes → Go `consumererror`
 
-**No Additional Implementation Needed:** Standard OTLP receiver/exporter components handle all Phase 5 propagation automatically.
+**No additional implementation needed:** Standard OTLP receiver/exporter components handle all Phase 5 propagation automatically.
 
 ## Core Architecture
 
-### Configuration Example: Input and Partitioned Output
+### Configuration Example
+
+The system demonstrates transparent configuration handling by automatically partitioning a single user configuration into separate Go and Rust processes when subprocess mode is used.
 
 **User Input Configuration:**
 
@@ -147,97 +135,43 @@ service:
 
 ### Partitioning Algorithm
 
-The service graph partitioner automatically analyzes the user's configuration and splits it into separate Go and Rust sub-graphs:
+The service graph partitioner automatically analyzes user configuration and splits it into separate Go and Rust sub-graphs:
 
-**Component Type Analysis:**
+**Service Graph Analysis:**
 
-- Uses Phase 1's component identification: components with `cargo` field are Rust components
-- All other components (with `gomod` field or standard collector components) are Go components
-- Creates a mapping of component names to their runtime (Go vs Rust)
+The partitioner performs three operations to automatically split mixed Go/Rust configurations:
 
-**Pipeline Dependency Analysis:**
+1. **Component Type Analysis**: Uses Phase 1's component identification where `cargo` fields indicate Rust components, while `gomod` fields or standard collector components are Go components.
 
-- Examines the `service.pipelines` configuration to understand data flow
-- Builds a dependency graph showing how data flows between components
-- Identifies the specific edges where data crosses from Go components to Rust components
+2. **Pipeline Dependency Analysis**: Examines `service.pipelines` configuration to build a dependency graph showing data flow between components and identifies boundary points where data crosses from Go to Rust components.
 
-**Bridge Insertion:**
+3. **Bridge Insertion**: Inserts OTLP bridge components at boundary points, using a single `otlp/bridge` exporter in the Go configuration and corresponding `otlp/bridge` receiver in the Rust configuration, connected via secure unix sockets.
 
-- Inserts a single `otlp/bridge` exporter in the Go configuration at boundary points
-- Inserts a corresponding `otlp/bridge` receiver in the Rust configuration
-- Uses a private unix socket for secure inter-process communication
-- Redirects pipeline connections to route through the bridge components
-
-**Configuration Generation:**
-
-- Produces a clean Go configuration with only Go components plus the bridge exporter
-- Produces a clean Rust configuration with only Rust components plus the bridge receiver
-- Both configurations use standard OTLP components that operators already understand
-- **Phase 2 Integration**: Rust components in the subprocess use serde-based configuration parsing established in Phase 2
+The result is clean, separate configurations using standard OTLP components that operators already understand, with Rust components in the subprocess using Phase 2's serde-based configuration parsing.
 
 ## Process Lifecycle Management
 
-### Subprocess Management
-
-The parent Go collector manages the Rust subprocess lifecycle through standard process management:
-
-**Startup Process:**
-
-- Extract the embedded Rust binary to a temporary location
-- Generate the partitioned Rust configuration file
-- Spawn the Rust collector subprocess with the configuration
-- Wait for the unix socket to become available (with timeout)
-- Integrate subprocess logs with the parent collector's logging system
-
-**Graceful Shutdown:**
-
-- Send SIGTERM to the Rust subprocess for graceful shutdown
-- Wait for the process to exit cleanly (with timeout)
-- If timeout expires, send SIGKILL to force termination
-- Clean up temporary files and socket paths
-
-**Health Monitoring:**
-
-- Periodic health checks via gRPC health service on the unix socket
-- Automatic restart on health check failures
-- OTLP exporter's built-in retry logic handles temporary connection issues
+The parent Go collector manages the complete lifecycle of the Rust subprocess using standard process management patterns. During startup, it extracts the embedded Rust binary, generates the partitioned configuration, and spawns the subprocess with proper socket coordination. Graceful shutdown uses SIGTERM with timeout fallback to SIGKILL, while health monitoring provides automatic restart capabilities on failures.
 
 ## Build Process Changes
 
-### Phase 1 Builder Extensions
+Phase 6 extends Phase 1's builder with minimal changes. The main addition is a `subprocess_mode` field in the distribution configuration supporting three modes: `auto` (automatic detection), `embedded` (force FFI), and `subprocess` (force out-of-process). Auto-detection examines the `CGO_ENABLED` environment variable and build tags to choose the optimal mode.
 
-Phase 6 extends Phase 1's builder with minimal changes to support subprocess mode:
-
-**Configuration Extensions:**
-
-- Adds a `subprocess_mode` field to the distribution configuration
-- Supports three modes: `auto` (detect automatically), `embedded` (force FFI), `subprocess` (force out-of-process)
-- Auto-detection checks the `CGO_ENABLED` environment variable and build tags
-
-**Build Process Modifications:**
-
-- **Embedded Mode**: Uses Phase 1-5 patterns to generate a single binary with static Rust library linking
-- **Subprocess Mode**: Builds the Rust collector as a standalone executable and embeds it in the Go binary
-- The builder automatically partitions the service graph configuration when in subprocess mode
-- Generates separate configuration files for the Go parent and Rust subprocess
-- **Factory Integration**: Phase 3's linkme-based factory registration works within the Rust subprocess, while Go uses standard collector factory patterns
+The builder adapts its behavior based on the selected mode. In embedded mode, it follows Phase 1-5 patterns to generate a single binary with static Rust library linking. In subprocess mode, it builds the Rust collector as a standalone executable, embeds it in the Go binary, and automatically partitions the service graph configuration into separate files for each process. Phase 3's linkme-based factory registration works within the Rust subprocess, while Go uses standard collector factory patterns.
 
 ### Binary Packaging
 
-**Embedded Binary Strategy:**
+The build process creates a single deployment artifact containing both the Go collector and the embedded Rust binary:
 
 - The Rust collector is built as a standalone executable during the build process
 - Go's `embed` directive packages the Rust binary directly into the Go collector executable
 - At runtime, the parent collector extracts the embedded binary to a temporary location
-- The extracted binary is made executable and used to spawn the Rust subprocess
 - Multiple platform binaries can be embedded for cross-platform distributions
-- **Runtime Configuration**: The Rust subprocess uses Phase 4's runtime configuration patterns for executor, alongside rust2go settings
+- **Runtime Configuration**: The Rust subprocess uses Phase 4's runtime configuration patterns for executor alongside rust2go settings
 
 ## Error Handling and Context Propagation
 
-### Leveraging Phase 5 via OTLP
-
-**All Phase 5 features work automatically through standard OTLP:**
+All Phase 5 features work automatically through standard OTLP:
 
 1. **Context Deadlines**: gRPC context deadlines in OTLP calls
 2. **Cancellation**: gRPC stream cancellation propagates across process boundary
@@ -245,24 +179,13 @@ Phase 6 extends Phase 1's builder with minimal changes to support subprocess mod
 4. **Metadata**: `client.Metadata` flows through gRPC headers
 5. **Tracing**: Distributed tracing context via gRPC metadata
 
-**Error Mapping**: Phase 5's structured `ProcessingError` enum maps to gRPC status codes in OTLP responses, which the Go collector translates back to `consumererror` classifications, preserving permanent vs retryable error semantics.
+Phase 5's structured `ProcessingError` enum maps to gRPC status codes in OTLP responses, which the Go collector translates back to `consumererror` classifications, preserving permanent vs retryable error semantics.
 
 **No additional implementation needed** - standard OTLP receiver/exporter handles all context propagation patterns established in Phase 5.
 
 ### Health Monitoring
 
-**Automated Health Checks:**
-
-- The parent collector periodically checks the Rust subprocess health via gRPC health service
-- Health checks use the same unix socket as data communication
-- Failed health checks trigger automatic subprocess restart attempts
-- The OTLP exporter's built-in retry logic handles temporary connection issues during restart
-
-**Operational Integration:**
-
-- Subprocess logs are integrated with the parent collector's logging system
-- Health status is exposed through the parent collector's metrics and status endpoints
-- Graceful degradation when the subprocess is temporarily unavailable
+Health monitoring, logging, and status reporting work seamlessly across process boundaries. The parent collector integrates subprocess logs with its own logging system and exposes combined health status through standard metrics and status endpoints. The system provides graceful degradation when the subprocess is temporarily unavailable.
 
 ## Platform Support and Compatibility
 
@@ -275,15 +198,11 @@ Phase 6 extends Phase 1's builder with minimal changes to support subprocess mod
 | Subprocess | Windows | Named pipes | Single binary |
 | Subprocess | Any | TCP localhost | Single binary |
 
-### Transparent User Experience
+### User Experience
 
-**Configuration remains identical:**
+Configuration remains completely identical between embedded and subprocess modes. Users specify the same YAML configuration regardless of the underlying communication mechanism. The builder automatically chooses the optimal mode based on constraints, and component specifications from Phase 1 require no changes.
 
-- Same YAML configuration for both modes
-- Builder automatically chooses mode based on constraints
-- No changes to component specifications from Phase 1
-
-**Mode Selection:**
+The builder supports three operation modes:
 
 - `subprocess_mode: auto` - Builder chooses best mode for platform
 - `subprocess_mode: embedded` - Force embedded mode (requires CGO)
@@ -301,20 +220,20 @@ Phase 6 extends Phase 1's builder with minimal changes to support subprocess mod
 | Startup | Fast | Moderate (process spawn) |
 | Complexity | Medium (FFI) | Low (standard OTLP) |
 
-### When to Use Each Mode
+**Use Case Guidelines:**
 
-**Embedded Mode (Phases 1-5):**
+Choose embedded mode (Phases 1-5) when:
 
-- Maximum performance requirements
+- Maximum performance is required
 - Platform supports CGO + rust2go
-- Complex FFI acceptable
+- Complex FFI integration is acceptable
 
-**Subprocess Mode (Phase 6):**
+Choose subprocess mode (Phase 6) when:
 
-- Pure Go build requirements
-- Platform limitations (CGO unavailable)
-- Operational simplicity preferred
-- Security isolation needed
+- Pure Go builds are required
+- Platform has CGO limitations
+- Operational simplicity is preferred
+- Security isolation between components is needed
 
 ## Success Criteria
 

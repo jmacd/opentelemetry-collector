@@ -66,24 +66,21 @@ processors:
 
 ### Validation Updates
 
-Current validation requires `gomod` field to be non-empty. Phase 1 updates validation to:
-- Accept modules with either `gomod` OR `cargo` fields (mutually exclusive)
-- Maintain existing error messages for clarity
-- Ensure components specify exactly one language
+Current validation required the `gomod` field to be non-empty. In Phase 1, validation is updated to:
 
-```go
-func validateModules(name string, mods []Module) error {
-    for i, mod := range mods {
-        if mod.GoMod == "" && mod.Cargo == "" {
-            return fmt.Errorf("%s module at index %v: missing gomod or cargo specification", name, i)
-        }
-        if mod.GoMod != "" && mod.Cargo != "" {
-            return fmt.Errorf("%s module at index %v: cannot specify both gomod and cargo", name, i)
-        }
-    }
-    return nil
-}
-```
+- Accept modules with either a `gomod` or `cargo` field (but not both)
+- Produce clear error messages if neither or both are specified
+- Ensure each component specifies exactly one language
+
+The validation logic checks each module and returns an error if:
+
+- Both `gomod` and `cargo` are empty (missing specification)
+- Both `gomod` and `cargo` are set (conflicting specification)
+
+This ensures configuration clarity and prevents ambiguous component definitions.
+
+**Component Name Collisions:**
+It is permitted for components to have the same name in both Go and Rust runtimes, provided they are functionally identical and one uses the other's configuration struct (for example, `otlp` and `otap` receivers/exporters maintained in parallel).
 
 ## YAML String Handling
 
@@ -174,54 +171,26 @@ pub trait ExtensionFactory {
 
 ### What's Deferred to Later Phases
 
-- **Phase 2: Configuration Structs** - serde-based config structs returned by factory `CreateDefaultConfig()`
-- **Phase 3: Extension Factories** - Complete `extension.Factory` implementation with rust2go lifecycle
-- **Phase 4: Pipeline Component Factories** - processor.Factory, exporter.Factory, receiver.Factory implementation
+- **Phase 2: Configuration Structs** – serde-based config structs from `CreateDefaultConfig()`
+- **Phase 3: Extension Factories** – Full `extension.Factory` with rust2go lifecycle
+- **Phase 4: Pipeline Component Factories** – processor, exporter, receiver factory implementation
 - Distribution struct enhancements for Rust toolchain
-- Factory discovery and registration infrastructure
-- Cargo patches (equivalent to Go replaces/excludes)
-
-## Configuration Strategy
-
-Phase 1 deliberately avoids addressing how Rust components will be configured at runtime. For initial implementation, Rust components will use empty configuration objects, allowing the builder and factory infrastructure to be established. **Phase 2 will focus specifically on the configuration design challenges**, including serde-based configuration structs and confmap integration.
-
-## Compatibility Impact
-
-### Backward Compatibility
-
-- All existing Go-only configurations work unchanged
-- No breaking changes to existing APIs or structures
-- Existing validation continues to work for Go modules
-
-### Forward Compatibility
-
-- Module struct extensible for future language support
-- Template system can be extended for additional build files
-- Validation framework supports multiple language requirements
-
-## Next Phase Considerations
-
-Phase 1 establishes the configuration foundation. Subsequent phases will need to address:
-
-1. **Phase 2: Runtime Configuration Design**: serde-based configuration structs, confmap integration, FFI validation
-2. **Phase 3: Build Process Integration**: Cargo.toml generation and Rust compilation
-3. **Phase 4: Component Registration**: Factory patterns for Rust components
-4. **Phase 5: rust2go Integration**: Go↔️Rust interoperability and runtime data processing
-5. **Toolchain Management**: Rust version specification in Distribution struct
+- Factory discovery and registration
+- Cargo patches (like Go replaces/excludes)
 
 ## Files Modified
 
 - `cmd/builder/internal/builder/config.go`: Enhanced Module struct and validation
-- (Future phases will modify templates and build process files)
+- (Future phases will update templates and build files)
 
 ## Testing Strategy
 
 Phase 1 testing focuses on configuration parsing and validation:
 
-- YAML parsing with new cargo field
-- Validation ensures mutually exclusive gomod/cargo fields
-- Validation accepts modules with either gomod or cargo
-- Backward compatibility with existing configurations
-- Error handling for malformed specifications
+- YAML parsing with the new `cargo` field
+- Validation for mutually exclusive `gomod`/`cargo` fields
+- Accepts modules with either `gomod` or `cargo`
+- Backward compatibility with existing configs
+- Error handling for malformed specs
 
-This design provides a solid foundation for mixed-language component support while maintaining the builder tool's existing simplicity and consistency. The mutually exclusive approach keeps the initial implementation simple while the unified Module struct maintains consistency with existing patterns.
+This design provides a solid foundation for mixed-language component support while keeping the builder tool simple and consistent. The mutually exclusive approach is straightforward, and the unified Module struct maintains pattern consistency.
