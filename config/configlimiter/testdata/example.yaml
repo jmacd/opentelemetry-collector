@@ -1,0 +1,167 @@
+
+extensions:
+  # HTTP receiver rate limiter.
+  localrate/http:
+    limiters:
+      - token_bucket:
+          # a token-bucket algorithm with standard parameters, see
+          # https://en.wikipedia.org/wiki/Token_bucket
+          rated: 50000
+          burst: 100000
+
+        # Unit for the token bucket are required; for a rate limiter
+        # this must be {countable}/{time_unit} The {time_unit}
+        # determines rate limiter scale, the {countable} serves for
+        # validation, ensuring callers use this limiter only for the
+        # correct {countable} weight.
+        unit: network_bytes/second
+
+        # conditions adds dimensions; by default empty implies a
+        # singular limit.
+        conditions:
+          - key: signal
+          - key: data_source
+          - key: tenant_id
+
+        # cardinality configures limits over the count of distinct 
+        # limiter instances and the behavior when a limit is exceeded.
+        # this field is unused when descriptors is empty.
+        cardinality:
+          # limit the maximum number of independent limiters
+          # for this extension instance.
+          max_count: 20
+      
+          # behaviors are:
+          #
+          # - refuse:  (error after max_count) meaning to fail
+          #            requests after max_count descriptors exist,
+          # - replace: (using LRU, re-use the longest-unused limiter)
+          #            meaning to lose isolation.
+          behavior: replace
+
+        # For local limiters, there is a corresponding metric computed.
+        # For rate limiters, this will be an OpenTelemetry Counter
+        # instrument. The limit request's key-values are applied as
+        # attributes to the metric event. Metric description is
+        # automatically generated.
+        metric_name: otelhttp.recv_wire.limiter
+          
+  # gRPC receiver rate limiter
+  localrate/grpc:
+    limiters:
+      - token_bucket:
+          rated: 1000000
+          burst: 5000000
+
+        unit: network_bytes/second
+
+        conditions:
+          - key: signal
+          - key: data_source
+          - key: tenant_id
+
+        metric_name: otelgrpc.recv_wire.limiter
+          
+  # A global HTTP rate limiter
+  #
+  # Global rate limiters re-use local rate limit requests
+  globalrate/http:
+    domain: public_ingest
+    service: { ... }
+
+  # A global HTTP rate limiter
+  globalrate/grpc:
+    domain: internal_ingest
+    service: { ... }
+
+  # Admission limits applied in all receivers
+  localresource/memory:
+    limiters:
+      # The first entry applies to a particular tenant with a dedicated memory limit.
+      - admission:
+          # the number of {countable} allowed to pass
+          allowed: 10000000
+          # the number of {countable} allowed to wait in LIFO order without
+          # immediately failing.
+          waiting: 2000000
+        # Resource limits are not time-oriented, should be a {countable}.
+        unit: request_bytes
+        conditions:
+          # This limiter applies when tenant_id is "premium".
+          - key: tenant_id
+            value: premium
+
+        # Resource limits are accounted using anOpenTelemetry UpDownCounter
+        # instrument based on the Acquire/Release interface.
+        metric_name: otelcol.admitted.premium.bytes
+
+      # Other tenants get a smaller amount (up to cardinality::max_count).
+      - admission:
+          allowed: 1000000
+          waiting: 200000
+        unit: request_bytes
+        conditions:
+          # This limiter applies when tenant_id is "standard".
+          - key: tenant_id
+            value: standard
+        metric_name: otelcol.admitted.standard.bytes
+
+receivers:
+  otlp:
+    protocols:
+      http:
+        limiters:
+          - request:
+              - opentelemetry_signal:
+                  descriptor_key: "signal"
+                  # automatic: traces | metrics | logs | profiles
+              - generic_key:
+                  # e.g., HTTP traffic is internal
+                  descriptor_key: "data_source"
+                  descriptor_value: "external"
+              - request_headers:
+                  header_name: "x-tenant-id"
+                  descriptor_key: "tenant_id"
+            # Apply local and then global compressed-byte limits (HTTP).
+            network_bytes:
+              - id: localrate/http
+              - id: globalrate/http
+            # Limit memory used in the pipeline based un uncompressed data size.
+            request_bytes:
+              - id: localresource/memory
+      grpc:
+        # Middleware limiters are applied before the request becomes
+        # a "pdata" object.
+        limiters:
+          - request:
+              - opentelemetry_signal:
+                  descriptor_key: "signal"
+              - generic_key:
+                  # e.g., gRPC traffic is internal
+                  descriptor_key: "data_source"
+                  descriptor_value: "internal"
+              - request_headers:
+                  # internal tenant ID
+                  descriptor_key: "tenant_id"
+                  header_name: "grpc-service-id"
+            # Apply local and then global compressed-byte limits (gRPC)
+            network_bytes:
+              - id: localrate/grpc
+              - id: globalrate/grpc
+            # Limit memory used in the pipeline based un uncompressed data size.
+            request_bytes:
+              - id: localresource/memory
+
+    # Receiver-level limits apply after middleware-limiters
+    # configured in the HTTP and gRPC sections above. Note that we
+    # only configure the {countable} categories here, not the
+    # requests, because middleware always runs first, here we apply
+    # the request(s) developed in either protocol's middleware.
+    limiters:
+      # Request items is not generally available in middelware, so we
+      # have to apply a request-items limit in this section after the
+      # middleware limits have been applied.  (Note there is not
+      # actually a localrate/items rate-limiter example shown above,
+      # this is for illustration.)
+      - request_items:
+          - id: localrate/items
