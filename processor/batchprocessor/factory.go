@@ -49,7 +49,11 @@ func createTraces(
 	cfg component.Config,
 	nextConsumer consumer.Traces,
 ) (processor.Traces, error) {
-	return newTracesBatchProcessor(set, nextConsumer, cfg.(*Config))
+	batchCfg := cfg.(*Config)
+	if batchCfg.UseExporterHelper() {
+		return newTracesProcessorWithExporterHelper(set, nextConsumer, batchCfg)
+	}
+	return newTracesBatchProcessor(set, nextConsumer, batchCfg)
 }
 
 func createMetrics(
@@ -58,7 +62,11 @@ func createMetrics(
 	cfg component.Config,
 	nextConsumer consumer.Metrics,
 ) (processor.Metrics, error) {
-	return newMetricsBatchProcessor(set, nextConsumer, cfg.(*Config))
+	batchCfg := cfg.(*Config)
+	if batchCfg.UseExporterHelper() {
+		return newMetricsProcessorWithExporterHelper(set, nextConsumer, batchCfg)
+	}
+	return newMetricsBatchProcessor(set, nextConsumer, batchCfg)
 }
 
 func createLogs(
@@ -67,5 +75,9 @@ func createLogs(
 	cfg component.Config,
 	nextConsumer consumer.Logs,
 ) (processor.Logs, error) {
-	return newLogsBatchProcessor(set, nextConsumer, cfg.(*Config))
+	batchCfg := cfg.(*Config)
+	if batchCfg.UseExporterHelper() {
+		return newLogsProcessorWithExporterHelper(set, nextConsumer, batchCfg)
+	}
+	return newLogsBatchProcessor(set, nextConsumer, batchCfg)
 }

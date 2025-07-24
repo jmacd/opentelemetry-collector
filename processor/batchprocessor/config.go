@@ -10,10 +10,13 @@ import (
 	"time"
 
 	"go.opentelemetry.io/collector/component"
+	"go.opentelemetry.io/collector/processor/batchprocessor/internal"
 )
 
 // Config defines configuration for batch processor.
 type Config struct {
+	// Legacy batching configuration (preserved for backward compatibility)
+
 	// Timeout sets the time after which a batch will be sent regardless of size.
 	// When this is set to zero, batched data will be sent immediately.
 	Timeout time.Duration `mapstructure:"timeout"`
@@ -44,14 +47,27 @@ type Config struct {
 	// batcher instances that will be created through a distinct
 	// combination of MetadataKeys.
 	MetadataCardinalityLimit uint32 `mapstructure:"metadata_cardinality_limit"`
+
 	// prevent unkeyed literal initialization
 	_ struct{}
 }
 
 var _ component.Config = (*Config)(nil)
 
+// UseExporterHelper returns true if the feature gate for using exporterhelper is enabled.
+func (cfg *Config) UseExporterHelper() bool {
+	return internal.UseExporterHelper.IsEnabled()
+}
+
 // Validate checks if the processor configuration is valid
 func (cfg *Config) Validate() error {
+	if cfg.UseExporterHelper() {
+		return cfg.validateExporterHelperConfig()
+	}
+	return cfg.validateLegacyConfig()
+}
+
+func (cfg *Config) validateLegacyConfig() error {
 	if cfg.SendBatchMaxSize > 0 && cfg.SendBatchMaxSize < cfg.SendBatchSize {
 		return errors.New("send_batch_max_size must be greater or equal to send_batch_size")
 	}
@@ -66,5 +82,22 @@ func (cfg *Config) Validate() error {
 	if cfg.Timeout < 0 {
 		return errors.New("timeout must be greater or equal to 0")
 	}
+	return nil
+}
+
+func (cfg *Config) validateExporterHelperConfig() error {
+	// Basic validation same as legacy
+	if cfg.SendBatchMaxSize > 0 && cfg.SendBatchMaxSize < cfg.SendBatchSize {
+		return errors.New("send_batch_max_size must be greater or equal to send_batch_size")
+	}
+	if cfg.Timeout < 0 {
+		return errors.New("timeout must be greater or equal to 0")
+	}
+
+	// metadata_keys not yet supported with exporterhelper implementation
+	if len(cfg.MetadataKeys) > 0 {
+		return errors.New("metadata_keys is not yet supported with exporterhelper implementation (feature gate enabled)")
+	}
+
 	return nil
 }
