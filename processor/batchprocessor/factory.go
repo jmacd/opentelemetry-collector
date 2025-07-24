@@ -50,7 +50,7 @@ func createTraces(
 	nextConsumer consumer.Traces,
 ) (processor.Traces, error) {
 	batchCfg := cfg.(*Config)
-	if batchCfg.UseExporterHelper() {
+	if useExporterHelper.IsEnabled() {
 		return newTracesProcessorWithExporterHelper(set, nextConsumer, batchCfg)
 	}
 	return newTracesBatchProcessor(set, nextConsumer, batchCfg)
@@ -63,7 +63,7 @@ func createMetrics(
 	nextConsumer consumer.Metrics,
 ) (processor.Metrics, error) {
 	batchCfg := cfg.(*Config)
-	if batchCfg.UseExporterHelper() {
+	if useExporterHelper.IsEnabled() {
 		return newMetricsProcessorWithExporterHelper(set, nextConsumer, batchCfg)
 	}
 	return newMetricsBatchProcessor(set, nextConsumer, batchCfg)
@@ -76,7 +76,7 @@ func createLogs(
 	nextConsumer consumer.Logs,
 ) (processor.Logs, error) {
 	batchCfg := cfg.(*Config)
-	if batchCfg.UseExporterHelper() {
+	if useExporterHelper.IsEnabled() {
 		return newLogsProcessorWithExporterHelper(set, nextConsumer, batchCfg)
 	}
 	return newLogsBatchProcessor(set, nextConsumer, batchCfg)

@@ -15,7 +15,6 @@ import (
 	"go.opentelemetry.io/collector/pdata/pmetric"
 	"go.opentelemetry.io/collector/pdata/ptrace"
 	"go.opentelemetry.io/collector/processor"
-	"go.opentelemetry.io/collector/processor/batchprocessor/internal"
 )
 
 // translateToExporterHelperConfig converts legacy batchprocessor config to exporterhelper config
@@ -23,7 +22,7 @@ func translateToExporterHelperConfig(cfg *Config) exporterhelper.QueueBatchConfi
 	// These settings match legacy behavior
 	queueBatchConfig := exporterhelper.QueueBatchConfig{
 		Enabled:         true,
-		WaitForResult:   true, 
+		WaitForResult:   propagateErrors.IsEnabled(), 
 		BlockOnOverflow: true,
 		Sizer:           exporterhelper.RequestSizerTypeItems,
 		QueueSize:       int64(max(cfg.SendBatchSize, cfg.SendBatchMaxSize, 1000)),
@@ -71,14 +70,7 @@ func newTracesProcessorWithExporterHelper(set processor.Settings, nextConsumer c
 		context.Background(),
 		exporterSet,
 		&bridgeConfig{},
-		func(ctx context.Context, traces ptrace.Traces) error {
-			if internal.PropagateErrors.IsEnabled() {
-				return nextConsumer.ConsumeTraces(ctx, traces)
-			}
-			// Legacy behavior: suppress errors
-			_ = nextConsumer.ConsumeTraces(ctx, traces)
-			return nil
-		},
+		nextConsumer.ConsumeTraces,
 		exporterhelper.WithQueue(queueBatchConfig),
 	)
 	if err != nil {
@@ -108,14 +100,7 @@ func newMetricsProcessorWithExporterHelper(set processor.Settings, nextConsumer 
 		context.Background(),
 		exporterSet,
 		&bridgeConfig{},
-		func(ctx context.Context, metrics pmetric.Metrics) error {
-			if internal.PropagateErrors.IsEnabled() {
-				return nextConsumer.ConsumeMetrics(ctx, metrics)
-			}
-			// Legacy behavior: suppress errors
-			_ = nextConsumer.ConsumeMetrics(ctx, metrics)
-			return nil
-		},
+		nextConsumer.ConsumeMetrics,
 		exporterhelper.WithQueue(queueBatchConfig),
 	)
 	if err != nil {
@@ -145,14 +130,7 @@ func newLogsProcessorWithExporterHelper(set processor.Settings, nextConsumer con
 		context.Background(),
 		exporterSet,
 		&bridgeConfig{},
-		func(ctx context.Context, logs plog.Logs) error {
-			if internal.PropagateErrors.IsEnabled() {
-				return nextConsumer.ConsumeLogs(ctx, logs)
-			}
-			// Legacy behavior: suppress errors
-			_ = nextConsumer.ConsumeLogs(ctx, logs)
-			return nil
-		},
+		nextConsumer.ConsumeLogs,
 		exporterhelper.WithQueue(queueBatchConfig),
 	)
 	if err != nil {
