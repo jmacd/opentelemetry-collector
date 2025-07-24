@@ -21,7 +21,7 @@ var (
 	// UseExporterHelper is the feature gate for using exporterhelper components.
 	useExporterHelper = featuregate.GlobalRegistry().MustRegister(
 		useExporterHelperGate,
-		featuregate.StageBeta,
+		featuregate.StageAlpha,
 		featuregate.WithRegisterDescription("Use exporterhelper components for batching instead of legacy implementation"),
 		featuregate.WithRegisterFromVersion("v0.131.0"),
 	)
@@ -29,7 +29,7 @@ var (
 	// PropagateErrors is the feature gate for propagating errors instead of suppressing them.
 	propagateErrors = featuregate.GlobalRegistry().MustRegister(
 		propagateErrorsGate,
-		featuregate.StageBeta,
+		featuregate.StageAlpha,
 		featuregate.WithRegisterDescription("Propagate errors from next consumer instead of suppressing them"),
 		featuregate.WithRegisterFromVersion("v0.131.0"),
 	)

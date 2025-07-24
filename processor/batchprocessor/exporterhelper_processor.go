@@ -6,14 +6,10 @@ package batchprocessor // import "go.opentelemetry.io/collector/processor/batchp
 import (
 	"context"
 
-	"go.opentelemetry.io/collector/component"
 	"go.opentelemetry.io/collector/config/configoptional"
 	"go.opentelemetry.io/collector/consumer"
 	"go.opentelemetry.io/collector/exporter"
 	"go.opentelemetry.io/collector/exporter/exporterhelper"
-	"go.opentelemetry.io/collector/pdata/plog"
-	"go.opentelemetry.io/collector/pdata/pmetric"
-	"go.opentelemetry.io/collector/pdata/ptrace"
 	"go.opentelemetry.io/collector/processor"
 )
 
@@ -55,159 +51,57 @@ func translateToExporterHelperConfig(cfg *Config) exporterhelper.QueueBatchConfi
 
 // newTracesProcessorWithExporterHelper creates a new traces processor using exporterhelper components.
 func newTracesProcessorWithExporterHelper(set processor.Settings, nextConsumer consumer.Traces, cfg *Config) (processor.Traces, error) {
-	// Translate legacy config to exporterhelper config
 	queueBatchConfig := translateToExporterHelperConfig(cfg)
 
-	// Create a bridge exporter that wraps the next consumer
 	exporterSet := exporter.Settings{
 		ID:                set.ID,
 		TelemetrySettings: set.TelemetrySettings,
 		BuildInfo:         set.BuildInfo,
 	}
 
-	// Create an exporter that pushes to the next consumer
-	tracesExporter, err := exporterhelper.NewTraces(
+	return exporterhelper.NewTraces(
 		context.Background(),
 		exporterSet,
-		&bridgeConfig{},
+		cfg,
 		nextConsumer.ConsumeTraces,
 		exporterhelper.WithQueue(queueBatchConfig),
 	)
-	if err != nil {
-		return nil, err
-	}
-
-	// Create a processor wrapper
-	return &tracesProcessorWrapper{
-		exporter: tracesExporter,
-	}, nil
 }
 
 // newMetricsProcessorWithExporterHelper creates a new metrics processor using exporterhelper components.
 func newMetricsProcessorWithExporterHelper(set processor.Settings, nextConsumer consumer.Metrics, cfg *Config) (processor.Metrics, error) {
-	// Translate legacy config to exporterhelper config
 	queueBatchConfig := translateToExporterHelperConfig(cfg)
 
-	// Create a bridge exporter that wraps the next consumer
 	exporterSet := exporter.Settings{
 		ID:                set.ID,
 		TelemetrySettings: set.TelemetrySettings,
 		BuildInfo:         set.BuildInfo,
 	}
 
-	// Create an exporter that pushes to the next consumer
-	metricsExporter, err := exporterhelper.NewMetrics(
+	return exporterhelper.NewMetrics(
 		context.Background(),
 		exporterSet,
-		&bridgeConfig{},
+		cfg,
 		nextConsumer.ConsumeMetrics,
 		exporterhelper.WithQueue(queueBatchConfig),
 	)
-	if err != nil {
-		return nil, err
-	}
-
-	// Create a processor wrapper
-	return &metricsProcessorWrapper{
-		exporter: metricsExporter,
-	}, nil
 }
 
 // newLogsProcessorWithExporterHelper creates a new logs processor using exporterhelper components.
 func newLogsProcessorWithExporterHelper(set processor.Settings, nextConsumer consumer.Logs, cfg *Config) (processor.Logs, error) {
-	// Translate legacy config to exporterhelper config
 	queueBatchConfig := translateToExporterHelperConfig(cfg)
 
-	// Create a bridge exporter that wraps the next consumer
 	exporterSet := exporter.Settings{
 		ID:                set.ID,
 		TelemetrySettings: set.TelemetrySettings,
 		BuildInfo:         set.BuildInfo,
 	}
 
-	// Create an exporter that pushes to the next consumer
-	logsExporter, err := exporterhelper.NewLogs(
+	return exporterhelper.NewLogs(
 		context.Background(),
 		exporterSet,
-		&bridgeConfig{},
+		cfg,
 		nextConsumer.ConsumeLogs,
 		exporterhelper.WithQueue(queueBatchConfig),
 	)
-	if err != nil {
-		return nil, err
-	}
-
-	// Create a processor wrapper
-	return &logsProcessorWrapper{
-		exporter: logsExporter,
-	}, nil
-}
-
-// bridgeConfig is a minimal config for the bridge exporter
-type bridgeConfig struct{}
-
-func (bc *bridgeConfig) Validate() error {
-	return nil
-}
-
-// Processor wrappers that implement the processor interfaces
-
-type tracesProcessorWrapper struct {
-	exporter exporter.Traces
-}
-
-func (tpw *tracesProcessorWrapper) ConsumeTraces(ctx context.Context, traces ptrace.Traces) error {
-	return tpw.exporter.ConsumeTraces(ctx, traces)
-}
-
-func (tpw *tracesProcessorWrapper) Capabilities() consumer.Capabilities {
-	return tpw.exporter.Capabilities()
-}
-
-func (tpw *tracesProcessorWrapper) Start(ctx context.Context, host component.Host) error {
-	return tpw.exporter.Start(ctx, host)
-}
-
-func (tpw *tracesProcessorWrapper) Shutdown(ctx context.Context) error {
-	return tpw.exporter.Shutdown(ctx)
-}
-
-type metricsProcessorWrapper struct {
-	exporter exporter.Metrics
-}
-
-func (mpw *metricsProcessorWrapper) ConsumeMetrics(ctx context.Context, metrics pmetric.Metrics) error {
-	return mpw.exporter.ConsumeMetrics(ctx, metrics)
-}
-
-func (mpw *metricsProcessorWrapper) Capabilities() consumer.Capabilities {
-	return mpw.exporter.Capabilities()
-}
-
-func (mpw *metricsProcessorWrapper) Start(ctx context.Context, host component.Host) error {
-	return mpw.exporter.Start(ctx, host)
-}
-
-func (mpw *metricsProcessorWrapper) Shutdown(ctx context.Context) error {
-	return mpw.exporter.Shutdown(ctx)
-}
-
-type logsProcessorWrapper struct {
-	exporter exporter.Logs
-}
-
-func (lpw *logsProcessorWrapper) ConsumeLogs(ctx context.Context, logs plog.Logs) error {
-	return lpw.exporter.ConsumeLogs(ctx, logs)
-}
-
-func (lpw *logsProcessorWrapper) Capabilities() consumer.Capabilities {
-	return lpw.exporter.Capabilities()
-}
-
-func (lpw *logsProcessorWrapper) Start(ctx context.Context, host component.Host) error {
-	return lpw.exporter.Start(ctx, host)
-}
-
-func (lpw *logsProcessorWrapper) Shutdown(ctx context.Context) error {
-	return lpw.exporter.Shutdown(ctx)
 }
