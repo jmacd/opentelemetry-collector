@@ -29,8 +29,7 @@ func newInstrumentationScope(orig *otlpcommon.InstrumentationScope, state *inter
 // This must be used only in testing code. Users should use "AppendEmpty" when part of a Slice,
 // OR directly access the member if this is embedded in another struct.
 func NewInstrumentationScope() InstrumentationScope {
-	state := internal.StateMutable
-	return newInstrumentationScope(&otlpcommon.InstrumentationScope{}, &state)
+	return newInstrumentationScope(internal.NewOrigPtrInstrumentationScope(), internal.NewState())
 }
 
 // MoveTo moves all properties from the current struct overriding the destination and
@@ -70,7 +69,7 @@ func (ms InstrumentationScope) SetVersion(v string) {
 
 // Attributes returns the Attributes associated with this InstrumentationScope.
 func (ms InstrumentationScope) Attributes() Map {
-	return Map(internal.NewMap(&ms.getOrig().Attributes, internal.GetInstrumentationScopeState(internal.InstrumentationScope(ms))))
+	return Map(internal.NewMap(&ms.getOrig().Attributes, ms.getState()))
 }
 
 // DroppedAttributesCount returns the droppedattributescount associated with this InstrumentationScope.

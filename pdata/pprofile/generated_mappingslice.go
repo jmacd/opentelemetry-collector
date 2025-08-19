@@ -12,7 +12,6 @@ import (
 
 	"go.opentelemetry.io/collector/pdata/internal"
 	otlpprofiles "go.opentelemetry.io/collector/pdata/internal/data/protogen/profiles/v1development"
-	"go.opentelemetry.io/collector/pdata/internal/json"
 )
 
 // MappingSlice logically represents a slice of Mapping.
@@ -35,8 +34,7 @@ func newMappingSlice(orig *[]*otlpprofiles.Mapping, state *internal.State) Mappi
 // Can use "EnsureCapacity" to initialize with a given capacity.
 func NewMappingSlice() MappingSlice {
 	orig := []*otlpprofiles.Mapping(nil)
-	state := internal.StateMutable
-	return newMappingSlice(&orig, &state)
+	return newMappingSlice(&orig, internal.NewState())
 }
 
 // Len returns the number of elements in the slice.
@@ -101,7 +99,7 @@ func (es MappingSlice) EnsureCapacity(newCap int) {
 // It returns the newly added Mapping.
 func (es MappingSlice) AppendEmpty() Mapping {
 	es.state.AssertMutable()
-	*es.orig = append(*es.orig, &otlpprofiles.Mapping{})
+	*es.orig = append(*es.orig, internal.NewOrigPtrMapping())
 	return es.At(es.Len() - 1)
 }
 
@@ -148,7 +146,7 @@ func (es MappingSlice) RemoveIf(f func(Mapping) bool) {
 // CopyTo copies all elements from the current slice overriding the destination.
 func (es MappingSlice) CopyTo(dest MappingSlice) {
 	dest.state.AssertMutable()
-	*dest.orig = copyOrigMappingSlice(*dest.orig, *es.orig)
+	*dest.orig = internal.CopyOrigMappingSlice(*dest.orig, *es.orig)
 }
 
 // Sort sorts the Mapping elements within MappingSlice given the
@@ -157,55 +155,4 @@ func (es MappingSlice) CopyTo(dest MappingSlice) {
 func (es MappingSlice) Sort(less func(a, b Mapping) bool) {
 	es.state.AssertMutable()
 	sort.SliceStable(*es.orig, func(i, j int) bool { return less(es.At(i), es.At(j)) })
-}
-
-// marshalJSONStream marshals all properties from the current struct to the destination stream.
-func (ms MappingSlice) marshalJSONStream(dest *json.Stream) {
-	dest.WriteArrayStart()
-	if len(*ms.orig) > 0 {
-		ms.At(0).marshalJSONStream(dest)
-	}
-	for i := 1; i < len(*ms.orig); i++ {
-		dest.WriteMore()
-		ms.At(i).marshalJSONStream(dest)
-	}
-	dest.WriteArrayEnd()
-}
-
-// unmarshalJSONIter unmarshals all properties from the current struct from the source iterator.
-func (ms MappingSlice) unmarshalJSONIter(iter *json.Iterator) {
-	iter.ReadArrayCB(func(iter *json.Iterator) bool {
-		*ms.orig = append(*ms.orig, &otlpprofiles.Mapping{})
-		ms.At(ms.Len() - 1).unmarshalJSONIter(iter)
-		return true
-	})
-}
-
-func copyOrigMappingSlice(dest, src []*otlpprofiles.Mapping) []*otlpprofiles.Mapping {
-	var newDest []*otlpprofiles.Mapping
-	if cap(dest) < len(src) {
-		newDest = make([]*otlpprofiles.Mapping, len(src))
-		// Copy old pointers to re-use.
-		copy(newDest, dest)
-		// Add new pointers for missing elements from len(dest) to len(srt).
-		for i := len(dest); i < len(src); i++ {
-			newDest[i] = &otlpprofiles.Mapping{}
-		}
-	} else {
-		newDest = dest[:len(src)]
-		// Cleanup the rest of the elements so GC can free the memory.
-		// This can happen when len(src) < len(dest) < cap(dest).
-		for i := len(src); i < len(dest); i++ {
-			dest[i] = nil
-		}
-		// Add new pointers for missing elements.
-		// This can happen when len(dest) < len(src) < cap(dest).
-		for i := len(dest); i < len(src); i++ {
-			newDest[i] = &otlpprofiles.Mapping{}
-		}
-	}
-	for i := range src {
-		copyOrigMapping(newDest[i], src[i])
-	}
-	return newDest
 }

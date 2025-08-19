@@ -12,7 +12,6 @@ import (
 
 	"go.opentelemetry.io/collector/pdata/internal"
 	otlpprofiles "go.opentelemetry.io/collector/pdata/internal/data/protogen/profiles/v1development"
-	"go.opentelemetry.io/collector/pdata/internal/json"
 )
 
 // ScopeProfilesSlice logically represents a slice of ScopeProfiles.
@@ -35,8 +34,7 @@ func newScopeProfilesSlice(orig *[]*otlpprofiles.ScopeProfiles, state *internal.
 // Can use "EnsureCapacity" to initialize with a given capacity.
 func NewScopeProfilesSlice() ScopeProfilesSlice {
 	orig := []*otlpprofiles.ScopeProfiles(nil)
-	state := internal.StateMutable
-	return newScopeProfilesSlice(&orig, &state)
+	return newScopeProfilesSlice(&orig, internal.NewState())
 }
 
 // Len returns the number of elements in the slice.
@@ -101,7 +99,7 @@ func (es ScopeProfilesSlice) EnsureCapacity(newCap int) {
 // It returns the newly added ScopeProfiles.
 func (es ScopeProfilesSlice) AppendEmpty() ScopeProfiles {
 	es.state.AssertMutable()
-	*es.orig = append(*es.orig, &otlpprofiles.ScopeProfiles{})
+	*es.orig = append(*es.orig, internal.NewOrigPtrScopeProfiles())
 	return es.At(es.Len() - 1)
 }
 
@@ -148,7 +146,7 @@ func (es ScopeProfilesSlice) RemoveIf(f func(ScopeProfiles) bool) {
 // CopyTo copies all elements from the current slice overriding the destination.
 func (es ScopeProfilesSlice) CopyTo(dest ScopeProfilesSlice) {
 	dest.state.AssertMutable()
-	*dest.orig = copyOrigScopeProfilesSlice(*dest.orig, *es.orig)
+	*dest.orig = internal.CopyOrigScopeProfilesSlice(*dest.orig, *es.orig)
 }
 
 // Sort sorts the ScopeProfiles elements within ScopeProfilesSlice given the
@@ -157,55 +155,4 @@ func (es ScopeProfilesSlice) CopyTo(dest ScopeProfilesSlice) {
 func (es ScopeProfilesSlice) Sort(less func(a, b ScopeProfiles) bool) {
 	es.state.AssertMutable()
 	sort.SliceStable(*es.orig, func(i, j int) bool { return less(es.At(i), es.At(j)) })
-}
-
-// marshalJSONStream marshals all properties from the current struct to the destination stream.
-func (ms ScopeProfilesSlice) marshalJSONStream(dest *json.Stream) {
-	dest.WriteArrayStart()
-	if len(*ms.orig) > 0 {
-		ms.At(0).marshalJSONStream(dest)
-	}
-	for i := 1; i < len(*ms.orig); i++ {
-		dest.WriteMore()
-		ms.At(i).marshalJSONStream(dest)
-	}
-	dest.WriteArrayEnd()
-}
-
-// unmarshalJSONIter unmarshals all properties from the current struct from the source iterator.
-func (ms ScopeProfilesSlice) unmarshalJSONIter(iter *json.Iterator) {
-	iter.ReadArrayCB(func(iter *json.Iterator) bool {
-		*ms.orig = append(*ms.orig, &otlpprofiles.ScopeProfiles{})
-		ms.At(ms.Len() - 1).unmarshalJSONIter(iter)
-		return true
-	})
-}
-
-func copyOrigScopeProfilesSlice(dest, src []*otlpprofiles.ScopeProfiles) []*otlpprofiles.ScopeProfiles {
-	var newDest []*otlpprofiles.ScopeProfiles
-	if cap(dest) < len(src) {
-		newDest = make([]*otlpprofiles.ScopeProfiles, len(src))
-		// Copy old pointers to re-use.
-		copy(newDest, dest)
-		// Add new pointers for missing elements from len(dest) to len(srt).
-		for i := len(dest); i < len(src); i++ {
-			newDest[i] = &otlpprofiles.ScopeProfiles{}
-		}
-	} else {
-		newDest = dest[:len(src)]
-		// Cleanup the rest of the elements so GC can free the memory.
-		// This can happen when len(src) < len(dest) < cap(dest).
-		for i := len(src); i < len(dest); i++ {
-			dest[i] = nil
-		}
-		// Add new pointers for missing elements.
-		// This can happen when len(dest) < len(src) < cap(dest).
-		for i := len(dest); i < len(src); i++ {
-			newDest[i] = &otlpprofiles.ScopeProfiles{}
-		}
-	}
-	for i := range src {
-		copyOrigScopeProfiles(newDest[i], src[i])
-	}
-	return newDest
 }
