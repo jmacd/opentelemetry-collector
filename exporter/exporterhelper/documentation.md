@@ -40,7 +40,7 @@ Number of spans failed to be added to the sending queue.
 
 ### otelcol_exporter_in_flight_requests
 
-Number of export requests currently in-flight (including retry backoff).
+Number of send requests currently in-flight (including retry backoff).
 
 | Unit | Metric Type | Value Type | Monotonic | Stability |
 | ---- | ----------- | ---------- | --------- | --------- |

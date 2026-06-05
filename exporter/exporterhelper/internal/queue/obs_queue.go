@@ -10,6 +10,7 @@ import (
 	"go.opentelemetry.io/otel/metric"
 	"go.opentelemetry.io/otel/trace"
 
+	"go.opentelemetry.io/collector/exporter/exporterhelper/internal/kindtelemetry"
 	"go.opentelemetry.io/collector/exporter/exporterhelper/internal/metadata"
 	"go.opentelemetry.io/collector/exporter/exporterhelper/internal/request"
 	"go.opentelemetry.io/collector/pipeline"
@@ -17,7 +18,9 @@ import (
 )
 
 const (
-	// ExporterKey used to identify exporters in metrics and traces.
+	// exporterKey is the legacy attribute key for the Exporter kind. The
+	// Identity-driven AttributeKey is the source of truth at runtime; this
+	// constant is kept for backward-compatibility of in-tree tests.
 	exporterKey = "exporter"
 
 	// DataTypeKey used to identify the data type in the queue size metric.
@@ -33,16 +36,21 @@ type obsQueue[T request.Request] struct {
 	queueBatchSizeInst      metric.Int64Histogram
 	queueBatchSizeBytesInst metric.Int64Histogram
 	tracer                  trace.Tracer
+	spanName                string
 }
 
 func newObsQueue[T request.Request](set Settings[T], delegate Queue[T]) (Queue[T], error) {
-	tb, err := metadata.NewTelemetryBuilder(set.Telemetry)
+	kindID := set.KindID
+	if kindID.AttributeKey == "" {
+		kindID = kindtelemetry.Default()
+	}
+	tb, err := metadata.NewTelemetryBuilder(set.Telemetry, kindID.TelemetryBuilderOptions()...)
 	if err != nil {
 		return nil, err
 	}
 
-	exporterAttr := attribute.String(exporterKey, set.ID.String())
-	asyncAttr := metric.WithAttributeSet(attribute.NewSet(exporterAttr, attribute.String(dataTypeKey, set.Signal.String())))
+	componentAttr := attribute.String(kindID.AttributeKey, set.ID.String())
+	asyncAttr := metric.WithAttributeSet(attribute.NewSet(componentAttr, attribute.String(dataTypeKey, set.Signal.String())))
 	err = tb.RegisterExporterQueueSizeCallback(func(_ context.Context, o metric.Int64Observer) error {
 		o.Observe(delegate.Size(), asyncAttr)
 		return nil
@@ -64,8 +72,9 @@ func newObsQueue[T request.Request](set Settings[T], delegate Queue[T]) (Queue[T
 	or := &obsQueue[T]{
 		Queue:      delegate,
 		tb:         tb,
-		metricAttr: metric.WithAttributeSet(attribute.NewSet(exporterAttr)),
+		metricAttr: metric.WithAttributeSet(attribute.NewSet(componentAttr)),
 		tracer:     tracer,
+		spanName:   kindID.SpanNamespace + "/enqueue",
 	}
 
 	switch set.Signal {
@@ -98,7 +107,7 @@ func (or *obsQueue[T]) Offer(ctx context.Context, req T) error {
 	or.queueBatchSizeInst.Record(ctx, int64(numItems), or.metricAttr)
 	or.queueBatchSizeBytesInst.Record(ctx, int64(req.BytesSize()), or.metricAttr)
 
-	ctx, span := or.tracer.Start(ctx, "exporter/enqueue")
+	ctx, span := or.tracer.Start(ctx, or.spanName)
 	err := or.Queue.Offer(ctx, req)
 	span.End()
 

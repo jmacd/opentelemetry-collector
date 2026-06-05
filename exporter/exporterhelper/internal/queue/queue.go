@@ -8,6 +8,7 @@ import (
 	"errors"
 
 	"go.opentelemetry.io/collector/component"
+	"go.opentelemetry.io/collector/exporter/exporterhelper/internal/kindtelemetry"
 	"go.opentelemetry.io/collector/exporter/exporterhelper/internal/request"
 	"go.opentelemetry.io/collector/pipeline"
 )
@@ -76,6 +77,10 @@ type Settings[T request.Request] struct {
 	Encoding         Encoding[T]
 	ID               component.ID
 	Telemetry        component.TelemetrySettings
+	// KindID controls the shape of the telemetry produced by the queue's
+	// observability layer: metric names, attribute key, and span name prefix.
+	// The zero value means exporter-kind telemetry.
+	KindID kindtelemetry.Identity
 }
 
 func NewQueue[T request.Request](set Settings[T], next ConsumeFunc[T]) (Queue[T], error) {

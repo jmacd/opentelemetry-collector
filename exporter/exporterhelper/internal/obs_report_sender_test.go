@@ -24,6 +24,7 @@ import (
 	"go.opentelemetry.io/collector/consumer/consumererror"
 	"go.opentelemetry.io/collector/exporter"
 	"go.opentelemetry.io/collector/exporter/exporterhelper/internal/experr"
+	"go.opentelemetry.io/collector/exporter/exporterhelper/internal/kindtelemetry"
 	"go.opentelemetry.io/collector/exporter/exporterhelper/internal/metadatatest"
 	"go.opentelemetry.io/collector/exporter/exporterhelper/internal/request"
 	"go.opentelemetry.io/collector/exporter/exporterhelper/internal/requesttest"
@@ -100,6 +101,7 @@ func TestExportTraceFailureAttributes(t *testing.T) {
 				exporter.Settings{ID: exporterID, TelemetrySettings: telemetry.NewTelemetrySettings(), BuildInfo: component.NewDefaultBuildInfo()},
 				pipeline.SignalTraces,
 				nil,
+				kindtelemetry.Default(),
 				sender.NewSender(func(context.Context, request.Request) error {
 					return tt.err
 				}),
@@ -175,6 +177,7 @@ func TestExportTraceFailureAttributesGRPCError(t *testing.T) {
 				exporter.Settings{ID: exporterID, TelemetrySettings: telemetry.NewTelemetrySettings(), BuildInfo: component.NewDefaultBuildInfo()},
 				pipeline.SignalTraces,
 				nil,
+				kindtelemetry.Default(),
 				sender.NewSender(func(context.Context, request.Request) error {
 					return grpcErr
 				}),
@@ -214,6 +217,7 @@ func TestExportTraceDataOp(t *testing.T) {
 		exporter.Settings{ID: exporterID, TelemetrySettings: tt.NewTelemetrySettings(), BuildInfo: component.NewDefaultBuildInfo()},
 		pipeline.SignalTraces,
 		nil,
+		kindtelemetry.Default(),
 		sender.NewSender(func(context.Context, request.Request) error { return exporterErr }),
 	)
 	require.NoError(t, err)
@@ -289,6 +293,7 @@ func TestExportMetricsOp(t *testing.T) {
 		exporter.Settings{ID: exporterID, TelemetrySettings: tt.NewTelemetrySettings(), BuildInfo: component.NewDefaultBuildInfo()},
 		pipeline.SignalMetrics,
 		nil,
+		kindtelemetry.Default(),
 		sender.NewSender(func(context.Context, request.Request) error { return exporterErr }),
 	)
 	require.NoError(t, err)
@@ -364,6 +369,7 @@ func TestExportLogsOp(t *testing.T) {
 		exporter.Settings{ID: exporterID, TelemetrySettings: tt.NewTelemetrySettings(), BuildInfo: component.NewDefaultBuildInfo()},
 		pipeline.SignalLogs,
 		nil,
+		kindtelemetry.Default(),
 		sender.NewSender(func(context.Context, request.Request) error { return exporterErr }),
 	)
 	require.NoError(t, err)
@@ -561,6 +567,7 @@ func TestExportProfilesOp(t *testing.T) {
 		exporter.Settings{ID: exporterID, TelemetrySettings: tt.NewTelemetrySettings(), BuildInfo: component.NewDefaultBuildInfo()},
 		xpipeline.SignalProfiles,
 		nil,
+		kindtelemetry.Default(),
 		sender.NewSender(func(context.Context, request.Request) error { return exporterErr }),
 	)
 	require.NoError(t, err)

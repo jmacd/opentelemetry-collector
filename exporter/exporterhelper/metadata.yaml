@@ -12,6 +12,11 @@ status:
     beta: [traces, metrics, logs]
 
 telemetry:
+  # Permits the WithMetricNamePrefixReplacement option on the generated
+  # TelemetryBuilder. Used to support reusing exporterhelper telemetry from a
+  # processor. See
+  # https://github.com/open-telemetry/opentelemetry-collector/issues/14038.
+  allow_name_substitution: true
   metrics:
     exporter_enqueue_failed_log_records:
       enabled: true
@@ -52,7 +57,7 @@ telemetry:
     exporter_in_flight_requests:
       enabled: true
       stability: development
-      description: Number of export requests currently in-flight (including retry backoff).
+      description: Number of send requests currently in-flight (including retry backoff).
       unit: "{request}"
       sum:
         value_type: int

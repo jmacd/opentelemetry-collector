@@ -1,0 +1,19 @@
+change_type: enhancement
+
+component: pkg/exporterhelper
+
+note: add WithTelemetryComponentKind option to support reuse from a processor
+
+issues: [14038]
+
+subtext: |
+  WithTelemetryComponentKind(component.Kind) lets a caller declare that the
+  exporterhelper instance belongs to a different component kind. Only
+  KindProcessor is supported in addition to the default KindExporter. When
+  the processor kind is selected, exporterhelper emits "otelcol_processor_*"
+  metric names, uses the "processor" metric and span attribute, and starts
+  spans with a "processor/<id>/<signal>" name. This unblocks reusing
+  exporterhelper's queue and batch logic from a processor without leaking
+  exporter-shaped telemetry into processor pipelines.
+
+change_logs: [api]

@@ -51,3 +51,20 @@ func WithCapabilities(capabilities consumer.Capabilities) Option {
 func WithAttrs(attrs ...attribute.KeyValue) Option {
 	return internal.WithAttributes(attrs...)
 }
+
+// WithTelemetryComponentKind selects the component kind under which this
+// exporterhelper instance reports telemetry. The default is
+// component.KindExporter, which preserves the historical
+// "otelcol_exporter_*" metric names, the "exporter" metric attribute, and
+// the "exporter/<id>/<signal>" span names. Passing
+// component.KindProcessor rewrites those to "otelcol_processor_*",
+// "processor", and "processor/<id>/<signal>" respectively. Only the
+// zero-value Kind, KindExporter, and KindProcessor are accepted; any other
+// Kind value causes the option to return an error.
+//
+// This option exists to support reusing exporterhelper's queue and batch
+// logic from a processor. See
+// https://github.com/open-telemetry/opentelemetry-collector/issues/14038.
+func WithTelemetryComponentKind(kind component.Kind) Option {
+	return internal.WithTelemetryComponentKind(kind)
+}

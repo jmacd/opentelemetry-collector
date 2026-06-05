@@ -8,6 +8,7 @@ import (
 	"errors"
 
 	"go.opentelemetry.io/collector/component"
+	"go.opentelemetry.io/collector/exporter/exporterhelper/internal/kindtelemetry"
 	"go.opentelemetry.io/collector/exporter/exporterhelper/internal/queue"
 	"go.opentelemetry.io/collector/exporter/exporterhelper/internal/request"
 	"go.opentelemetry.io/collector/exporter/exporterhelper/internal/sender"
@@ -28,6 +29,9 @@ type AllSettings[T any] struct {
 	Signal    pipeline.Signal
 	ID        component.ID
 	Telemetry component.TelemetrySettings
+	// KindID controls the telemetry shape: metric names, attribute key, and
+	// span name prefix. The zero value means exporter-kind telemetry.
+	KindID kindtelemetry.Identity
 }
 
 type QueueBatch struct {
@@ -68,6 +72,7 @@ func NewQueueBatch(
 		Encoding:         set.Encoding,
 		ID:               set.ID,
 		Telemetry:        set.Telemetry,
+		KindID:           set.KindID,
 	}, b.Consume)
 	if err != nil {
 		return nil, err

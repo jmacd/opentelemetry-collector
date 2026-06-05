@@ -6,15 +6,72 @@ import (
 	"testing"
 
 	"github.com/stretchr/testify/require"
+	"go.opentelemetry.io/collector/component/componenttest"
 	"go.opentelemetry.io/otel/sdk/metric/metricdata"
 	"go.opentelemetry.io/otel/sdk/metric/metricdata/metricdatatest"
-
-	"go.opentelemetry.io/collector/component/componenttest"
 )
 
-func AssertEqualExporterEnqueueFailedLogRecords(t *testing.T, tt *componenttest.Telemetry, dps []metricdata.DataPoint[int64], opts ...metricdatatest.Option) {
+// AssertOptions controls the metric-name resolution used by the AssertEqual*
+// helpers. Pass options matching the WithMetricNamePrefixReplacement option
+// used to construct the TelemetryBuilder under test.
+type AssertOptions struct {
+	oldPrefix string
+	newPrefix string
+}
+
+// AssertOption applies changes to AssertOptions.
+type AssertOption interface {
+	apply(*AssertOptions)
+}
+
+type assertOptionFunc func(*AssertOptions)
+
+func (f assertOptionFunc) apply(o *AssertOptions) { f(o) }
+
+// WithMetricNamePrefixReplacement informs the AssertEqual* helpers that the
+// TelemetryBuilder under test was constructed with the matching
+// WithMetricNamePrefixReplacement option.
+func WithMetricNamePrefixReplacement(oldPrefix, newPrefix string) AssertOption {
+	return assertOptionFunc(func(o *AssertOptions) {
+		o.oldPrefix = oldPrefix
+		o.newPrefix = newPrefix
+	})
+}
+
+func resolveMetricName(name string, opts []AssertOption) string {
+	a := AssertOptions{}
+	for _, opt := range opts {
+		opt.apply(&a)
+	}
+	if a.oldPrefix == "" {
+		return name
+	}
+	if !startsWith(name, a.oldPrefix) {
+		return name
+	}
+	return a.newPrefix + name[len(a.oldPrefix):]
+}
+
+func startsWith(s, prefix string) bool {
+	return len(s) >= len(prefix) && s[:len(prefix)] == prefix
+}
+
+func AssertEqualExporterEnqueueFailedLogRecords(t *testing.T, tt *componenttest.Telemetry, dps []metricdata.DataPoint[int64], opts ...any) {
+	var assertOpts []AssertOption
+	var mdOpts []metricdatatest.Option
+	for _, o := range opts {
+		switch v := o.(type) {
+		case AssertOption:
+			assertOpts = append(assertOpts, v)
+		case metricdatatest.Option:
+			mdOpts = append(mdOpts, v)
+		default:
+			require.Failf(t, "unexpected option type", "%T", o)
+		}
+	}
+	name := resolveMetricName("otelcol_exporter_enqueue_failed_log_records", assertOpts)
 	want := metricdata.Metrics{
-		Name:        "otelcol_exporter_enqueue_failed_log_records",
+		Name:        name,
 		Description: "Number of log records failed to be added to the sending queue. [Alpha]",
 		Unit:        "{record}",
 		Data: metricdata.Sum[int64]{
@@ -23,14 +80,27 @@ func AssertEqualExporterEnqueueFailedLogRecords(t *testing.T, tt *componenttest.
 			DataPoints:  dps,
 		},
 	}
-	got, err := tt.GetMetric("otelcol_exporter_enqueue_failed_log_records")
+	got, err := tt.GetMetric(name)
 	require.NoError(t, err)
-	metricdatatest.AssertEqual(t, want, got, opts...)
+	metricdatatest.AssertEqual(t, want, got, mdOpts...)
 }
 
-func AssertEqualExporterEnqueueFailedMetricPoints(t *testing.T, tt *componenttest.Telemetry, dps []metricdata.DataPoint[int64], opts ...metricdatatest.Option) {
+func AssertEqualExporterEnqueueFailedMetricPoints(t *testing.T, tt *componenttest.Telemetry, dps []metricdata.DataPoint[int64], opts ...any) {
+	var assertOpts []AssertOption
+	var mdOpts []metricdatatest.Option
+	for _, o := range opts {
+		switch v := o.(type) {
+		case AssertOption:
+			assertOpts = append(assertOpts, v)
+		case metricdatatest.Option:
+			mdOpts = append(mdOpts, v)
+		default:
+			require.Failf(t, "unexpected option type", "%T", o)
+		}
+	}
+	name := resolveMetricName("otelcol_exporter_enqueue_failed_metric_points", assertOpts)
 	want := metricdata.Metrics{
-		Name:        "otelcol_exporter_enqueue_failed_metric_points",
+		Name:        name,
 		Description: "Number of metric points failed to be added to the sending queue. [Alpha]",
 		Unit:        "{datapoint}",
 		Data: metricdata.Sum[int64]{
@@ -39,14 +109,27 @@ func AssertEqualExporterEnqueueFailedMetricPoints(t *testing.T, tt *componenttes
 			DataPoints:  dps,
 		},
 	}
-	got, err := tt.GetMetric("otelcol_exporter_enqueue_failed_metric_points")
+	got, err := tt.GetMetric(name)
 	require.NoError(t, err)
-	metricdatatest.AssertEqual(t, want, got, opts...)
+	metricdatatest.AssertEqual(t, want, got, mdOpts...)
 }
 
-func AssertEqualExporterEnqueueFailedProfileSamples(t *testing.T, tt *componenttest.Telemetry, dps []metricdata.DataPoint[int64], opts ...metricdatatest.Option) {
+func AssertEqualExporterEnqueueFailedProfileSamples(t *testing.T, tt *componenttest.Telemetry, dps []metricdata.DataPoint[int64], opts ...any) {
+	var assertOpts []AssertOption
+	var mdOpts []metricdatatest.Option
+	for _, o := range opts {
+		switch v := o.(type) {
+		case AssertOption:
+			assertOpts = append(assertOpts, v)
+		case metricdatatest.Option:
+			mdOpts = append(mdOpts, v)
+		default:
+			require.Failf(t, "unexpected option type", "%T", o)
+		}
+	}
+	name := resolveMetricName("otelcol_exporter_enqueue_failed_profile_samples", assertOpts)
 	want := metricdata.Metrics{
-		Name:        "otelcol_exporter_enqueue_failed_profile_samples",
+		Name:        name,
 		Description: "Number of profile samples failed to be added to the sending queue. [Development]",
 		Unit:        "{sample}",
 		Data: metricdata.Sum[int64]{
@@ -55,14 +138,27 @@ func AssertEqualExporterEnqueueFailedProfileSamples(t *testing.T, tt *componentt
 			DataPoints:  dps,
 		},
 	}
-	got, err := tt.GetMetric("otelcol_exporter_enqueue_failed_profile_samples")
+	got, err := tt.GetMetric(name)
 	require.NoError(t, err)
-	metricdatatest.AssertEqual(t, want, got, opts...)
+	metricdatatest.AssertEqual(t, want, got, mdOpts...)
 }
 
-func AssertEqualExporterEnqueueFailedSpans(t *testing.T, tt *componenttest.Telemetry, dps []metricdata.DataPoint[int64], opts ...metricdatatest.Option) {
+func AssertEqualExporterEnqueueFailedSpans(t *testing.T, tt *componenttest.Telemetry, dps []metricdata.DataPoint[int64], opts ...any) {
+	var assertOpts []AssertOption
+	var mdOpts []metricdatatest.Option
+	for _, o := range opts {
+		switch v := o.(type) {
+		case AssertOption:
+			assertOpts = append(assertOpts, v)
+		case metricdatatest.Option:
+			mdOpts = append(mdOpts, v)
+		default:
+			require.Failf(t, "unexpected option type", "%T", o)
+		}
+	}
+	name := resolveMetricName("otelcol_exporter_enqueue_failed_spans", assertOpts)
 	want := metricdata.Metrics{
-		Name:        "otelcol_exporter_enqueue_failed_spans",
+		Name:        name,
 		Description: "Number of spans failed to be added to the sending queue. [Alpha]",
 		Unit:        "{span}",
 		Data: metricdata.Sum[int64]{
@@ -71,15 +167,28 @@ func AssertEqualExporterEnqueueFailedSpans(t *testing.T, tt *componenttest.Telem
 			DataPoints:  dps,
 		},
 	}
-	got, err := tt.GetMetric("otelcol_exporter_enqueue_failed_spans")
+	got, err := tt.GetMetric(name)
 	require.NoError(t, err)
-	metricdatatest.AssertEqual(t, want, got, opts...)
+	metricdatatest.AssertEqual(t, want, got, mdOpts...)
 }
 
-func AssertEqualExporterInFlightRequests(t *testing.T, tt *componenttest.Telemetry, dps []metricdata.DataPoint[int64], opts ...metricdatatest.Option) {
+func AssertEqualExporterInFlightRequests(t *testing.T, tt *componenttest.Telemetry, dps []metricdata.DataPoint[int64], opts ...any) {
+	var assertOpts []AssertOption
+	var mdOpts []metricdatatest.Option
+	for _, o := range opts {
+		switch v := o.(type) {
+		case AssertOption:
+			assertOpts = append(assertOpts, v)
+		case metricdatatest.Option:
+			mdOpts = append(mdOpts, v)
+		default:
+			require.Failf(t, "unexpected option type", "%T", o)
+		}
+	}
+	name := resolveMetricName("otelcol_exporter_in_flight_requests", assertOpts)
 	want := metricdata.Metrics{
-		Name:        "otelcol_exporter_in_flight_requests",
-		Description: "Number of export requests currently in-flight (including retry backoff). [Development]",
+		Name:        name,
+		Description: "Number of send requests currently in-flight (including retry backoff). [Development]",
 		Unit:        "{request}",
 		Data: metricdata.Sum[int64]{
 			Temporality: metricdata.CumulativeTemporality,
@@ -87,14 +196,27 @@ func AssertEqualExporterInFlightRequests(t *testing.T, tt *componenttest.Telemet
 			DataPoints:  dps,
 		},
 	}
-	got, err := tt.GetMetric("otelcol_exporter_in_flight_requests")
+	got, err := tt.GetMetric(name)
 	require.NoError(t, err)
-	metricdatatest.AssertEqual(t, want, got, opts...)
+	metricdatatest.AssertEqual(t, want, got, mdOpts...)
 }
 
-func AssertEqualExporterQueueBatchSendSize(t *testing.T, tt *componenttest.Telemetry, dps []metricdata.HistogramDataPoint[int64], opts ...metricdatatest.Option) {
+func AssertEqualExporterQueueBatchSendSize(t *testing.T, tt *componenttest.Telemetry, dps []metricdata.HistogramDataPoint[int64], opts ...any) {
+	var assertOpts []AssertOption
+	var mdOpts []metricdatatest.Option
+	for _, o := range opts {
+		switch v := o.(type) {
+		case AssertOption:
+			assertOpts = append(assertOpts, v)
+		case metricdatatest.Option:
+			mdOpts = append(mdOpts, v)
+		default:
+			require.Failf(t, "unexpected option type", "%T", o)
+		}
+	}
+	name := resolveMetricName("otelcol_exporter_queue_batch_send_size", assertOpts)
 	want := metricdata.Metrics{
-		Name:        "otelcol_exporter_queue_batch_send_size",
+		Name:        name,
 		Description: "Number of units in the batch [Development]",
 		Unit:        "{unit}",
 		Data: metricdata.Histogram[int64]{
@@ -102,14 +224,27 @@ func AssertEqualExporterQueueBatchSendSize(t *testing.T, tt *componenttest.Telem
 			DataPoints:  dps,
 		},
 	}
-	got, err := tt.GetMetric("otelcol_exporter_queue_batch_send_size")
+	got, err := tt.GetMetric(name)
 	require.NoError(t, err)
-	metricdatatest.AssertEqual(t, want, got, opts...)
+	metricdatatest.AssertEqual(t, want, got, mdOpts...)
 }
 
-func AssertEqualExporterQueueBatchSendSizeBytes(t *testing.T, tt *componenttest.Telemetry, dps []metricdata.HistogramDataPoint[int64], opts ...metricdatatest.Option) {
+func AssertEqualExporterQueueBatchSendSizeBytes(t *testing.T, tt *componenttest.Telemetry, dps []metricdata.HistogramDataPoint[int64], opts ...any) {
+	var assertOpts []AssertOption
+	var mdOpts []metricdatatest.Option
+	for _, o := range opts {
+		switch v := o.(type) {
+		case AssertOption:
+			assertOpts = append(assertOpts, v)
+		case metricdatatest.Option:
+			mdOpts = append(mdOpts, v)
+		default:
+			require.Failf(t, "unexpected option type", "%T", o)
+		}
+	}
+	name := resolveMetricName("otelcol_exporter_queue_batch_send_size_bytes", assertOpts)
 	want := metricdata.Metrics{
-		Name:        "otelcol_exporter_queue_batch_send_size_bytes",
+		Name:        name,
 		Description: "Number of bytes in batch that was sent. Only available on detailed level. [Development]",
 		Unit:        "By",
 		Data: metricdata.Histogram[int64]{
@@ -117,42 +252,81 @@ func AssertEqualExporterQueueBatchSendSizeBytes(t *testing.T, tt *componenttest.
 			DataPoints:  dps,
 		},
 	}
-	got, err := tt.GetMetric("otelcol_exporter_queue_batch_send_size_bytes")
+	got, err := tt.GetMetric(name)
 	require.NoError(t, err)
-	metricdatatest.AssertEqual(t, want, got, opts...)
+	metricdatatest.AssertEqual(t, want, got, mdOpts...)
 }
 
-func AssertEqualExporterQueueCapacity(t *testing.T, tt *componenttest.Telemetry, dps []metricdata.DataPoint[int64], opts ...metricdatatest.Option) {
+func AssertEqualExporterQueueCapacity(t *testing.T, tt *componenttest.Telemetry, dps []metricdata.DataPoint[int64], opts ...any) {
+	var assertOpts []AssertOption
+	var mdOpts []metricdatatest.Option
+	for _, o := range opts {
+		switch v := o.(type) {
+		case AssertOption:
+			assertOpts = append(assertOpts, v)
+		case metricdatatest.Option:
+			mdOpts = append(mdOpts, v)
+		default:
+			require.Failf(t, "unexpected option type", "%T", o)
+		}
+	}
+	name := resolveMetricName("otelcol_exporter_queue_capacity", assertOpts)
 	want := metricdata.Metrics{
-		Name:        "otelcol_exporter_queue_capacity",
+		Name:        name,
 		Description: "Fixed capacity of the retry queue (in batches). [Alpha]",
 		Unit:        "{batch}",
 		Data: metricdata.Gauge[int64]{
 			DataPoints: dps,
 		},
 	}
-	got, err := tt.GetMetric("otelcol_exporter_queue_capacity")
+	got, err := tt.GetMetric(name)
 	require.NoError(t, err)
-	metricdatatest.AssertEqual(t, want, got, opts...)
+	metricdatatest.AssertEqual(t, want, got, mdOpts...)
 }
 
-func AssertEqualExporterQueueSize(t *testing.T, tt *componenttest.Telemetry, dps []metricdata.DataPoint[int64], opts ...metricdatatest.Option) {
+func AssertEqualExporterQueueSize(t *testing.T, tt *componenttest.Telemetry, dps []metricdata.DataPoint[int64], opts ...any) {
+	var assertOpts []AssertOption
+	var mdOpts []metricdatatest.Option
+	for _, o := range opts {
+		switch v := o.(type) {
+		case AssertOption:
+			assertOpts = append(assertOpts, v)
+		case metricdatatest.Option:
+			mdOpts = append(mdOpts, v)
+		default:
+			require.Failf(t, "unexpected option type", "%T", o)
+		}
+	}
+	name := resolveMetricName("otelcol_exporter_queue_size", assertOpts)
 	want := metricdata.Metrics{
-		Name:        "otelcol_exporter_queue_size",
+		Name:        name,
 		Description: "Current size of the retry queue (in batches). [Alpha]",
 		Unit:        "{batch}",
 		Data: metricdata.Gauge[int64]{
 			DataPoints: dps,
 		},
 	}
-	got, err := tt.GetMetric("otelcol_exporter_queue_size")
+	got, err := tt.GetMetric(name)
 	require.NoError(t, err)
-	metricdatatest.AssertEqual(t, want, got, opts...)
+	metricdatatest.AssertEqual(t, want, got, mdOpts...)
 }
 
-func AssertEqualExporterSendFailedLogRecords(t *testing.T, tt *componenttest.Telemetry, dps []metricdata.DataPoint[int64], opts ...metricdatatest.Option) {
+func AssertEqualExporterSendFailedLogRecords(t *testing.T, tt *componenttest.Telemetry, dps []metricdata.DataPoint[int64], opts ...any) {
+	var assertOpts []AssertOption
+	var mdOpts []metricdatatest.Option
+	for _, o := range opts {
+		switch v := o.(type) {
+		case AssertOption:
+			assertOpts = append(assertOpts, v)
+		case metricdatatest.Option:
+			mdOpts = append(mdOpts, v)
+		default:
+			require.Failf(t, "unexpected option type", "%T", o)
+		}
+	}
+	name := resolveMetricName("otelcol_exporter_send_failed_log_records", assertOpts)
 	want := metricdata.Metrics{
-		Name:        "otelcol_exporter_send_failed_log_records",
+		Name:        name,
 		Description: "Number of log records in failed attempts to send to destination. At detailed telemetry level, includes attributes: error.type (semantic convention), error.permanent. [Alpha]",
 		Unit:        "{record}",
 		Data: metricdata.Sum[int64]{
@@ -161,14 +335,27 @@ func AssertEqualExporterSendFailedLogRecords(t *testing.T, tt *componenttest.Tel
 			DataPoints:  dps,
 		},
 	}
-	got, err := tt.GetMetric("otelcol_exporter_send_failed_log_records")
+	got, err := tt.GetMetric(name)
 	require.NoError(t, err)
-	metricdatatest.AssertEqual(t, want, got, opts...)
+	metricdatatest.AssertEqual(t, want, got, mdOpts...)
 }
 
-func AssertEqualExporterSendFailedMetricPoints(t *testing.T, tt *componenttest.Telemetry, dps []metricdata.DataPoint[int64], opts ...metricdatatest.Option) {
+func AssertEqualExporterSendFailedMetricPoints(t *testing.T, tt *componenttest.Telemetry, dps []metricdata.DataPoint[int64], opts ...any) {
+	var assertOpts []AssertOption
+	var mdOpts []metricdatatest.Option
+	for _, o := range opts {
+		switch v := o.(type) {
+		case AssertOption:
+			assertOpts = append(assertOpts, v)
+		case metricdatatest.Option:
+			mdOpts = append(mdOpts, v)
+		default:
+			require.Failf(t, "unexpected option type", "%T", o)
+		}
+	}
+	name := resolveMetricName("otelcol_exporter_send_failed_metric_points", assertOpts)
 	want := metricdata.Metrics{
-		Name:        "otelcol_exporter_send_failed_metric_points",
+		Name:        name,
 		Description: "Number of metric points in failed attempts to send to destination. At detailed telemetry level, includes attributes: error.type (semantic convention), error.permanent. [Alpha]",
 		Unit:        "{datapoint}",
 		Data: metricdata.Sum[int64]{
@@ -177,14 +364,27 @@ func AssertEqualExporterSendFailedMetricPoints(t *testing.T, tt *componenttest.T
 			DataPoints:  dps,
 		},
 	}
-	got, err := tt.GetMetric("otelcol_exporter_send_failed_metric_points")
+	got, err := tt.GetMetric(name)
 	require.NoError(t, err)
-	metricdatatest.AssertEqual(t, want, got, opts...)
+	metricdatatest.AssertEqual(t, want, got, mdOpts...)
 }
 
-func AssertEqualExporterSendFailedProfileSamples(t *testing.T, tt *componenttest.Telemetry, dps []metricdata.DataPoint[int64], opts ...metricdatatest.Option) {
+func AssertEqualExporterSendFailedProfileSamples(t *testing.T, tt *componenttest.Telemetry, dps []metricdata.DataPoint[int64], opts ...any) {
+	var assertOpts []AssertOption
+	var mdOpts []metricdatatest.Option
+	for _, o := range opts {
+		switch v := o.(type) {
+		case AssertOption:
+			assertOpts = append(assertOpts, v)
+		case metricdatatest.Option:
+			mdOpts = append(mdOpts, v)
+		default:
+			require.Failf(t, "unexpected option type", "%T", o)
+		}
+	}
+	name := resolveMetricName("otelcol_exporter_send_failed_profile_samples", assertOpts)
 	want := metricdata.Metrics{
-		Name:        "otelcol_exporter_send_failed_profile_samples",
+		Name:        name,
 		Description: "Number of profile samples in failed attempts to send to destination. At detailed telemetry level, includes attributes: error.type (semantic convention), error.permanent. [Development]",
 		Unit:        "{sample}",
 		Data: metricdata.Sum[int64]{
@@ -193,14 +393,27 @@ func AssertEqualExporterSendFailedProfileSamples(t *testing.T, tt *componenttest
 			DataPoints:  dps,
 		},
 	}
-	got, err := tt.GetMetric("otelcol_exporter_send_failed_profile_samples")
+	got, err := tt.GetMetric(name)
 	require.NoError(t, err)
-	metricdatatest.AssertEqual(t, want, got, opts...)
+	metricdatatest.AssertEqual(t, want, got, mdOpts...)
 }
 
-func AssertEqualExporterSendFailedSpans(t *testing.T, tt *componenttest.Telemetry, dps []metricdata.DataPoint[int64], opts ...metricdatatest.Option) {
+func AssertEqualExporterSendFailedSpans(t *testing.T, tt *componenttest.Telemetry, dps []metricdata.DataPoint[int64], opts ...any) {
+	var assertOpts []AssertOption
+	var mdOpts []metricdatatest.Option
+	for _, o := range opts {
+		switch v := o.(type) {
+		case AssertOption:
+			assertOpts = append(assertOpts, v)
+		case metricdatatest.Option:
+			mdOpts = append(mdOpts, v)
+		default:
+			require.Failf(t, "unexpected option type", "%T", o)
+		}
+	}
+	name := resolveMetricName("otelcol_exporter_send_failed_spans", assertOpts)
 	want := metricdata.Metrics{
-		Name:        "otelcol_exporter_send_failed_spans",
+		Name:        name,
 		Description: "Number of spans in failed attempts to send to destination. At detailed telemetry level, includes attributes: error.type (semantic convention), error.permanent. [Alpha]",
 		Unit:        "{span}",
 		Data: metricdata.Sum[int64]{
@@ -209,14 +422,27 @@ func AssertEqualExporterSendFailedSpans(t *testing.T, tt *componenttest.Telemetr
 			DataPoints:  dps,
 		},
 	}
-	got, err := tt.GetMetric("otelcol_exporter_send_failed_spans")
+	got, err := tt.GetMetric(name)
 	require.NoError(t, err)
-	metricdatatest.AssertEqual(t, want, got, opts...)
+	metricdatatest.AssertEqual(t, want, got, mdOpts...)
 }
 
-func AssertEqualExporterSentLogRecords(t *testing.T, tt *componenttest.Telemetry, dps []metricdata.DataPoint[int64], opts ...metricdatatest.Option) {
+func AssertEqualExporterSentLogRecords(t *testing.T, tt *componenttest.Telemetry, dps []metricdata.DataPoint[int64], opts ...any) {
+	var assertOpts []AssertOption
+	var mdOpts []metricdatatest.Option
+	for _, o := range opts {
+		switch v := o.(type) {
+		case AssertOption:
+			assertOpts = append(assertOpts, v)
+		case metricdatatest.Option:
+			mdOpts = append(mdOpts, v)
+		default:
+			require.Failf(t, "unexpected option type", "%T", o)
+		}
+	}
+	name := resolveMetricName("otelcol_exporter_sent_log_records", assertOpts)
 	want := metricdata.Metrics{
-		Name:        "otelcol_exporter_sent_log_records",
+		Name:        name,
 		Description: "Number of log record successfully sent to destination. [Alpha]",
 		Unit:        "{record}",
 		Data: metricdata.Sum[int64]{
@@ -225,14 +451,27 @@ func AssertEqualExporterSentLogRecords(t *testing.T, tt *componenttest.Telemetry
 			DataPoints:  dps,
 		},
 	}
-	got, err := tt.GetMetric("otelcol_exporter_sent_log_records")
+	got, err := tt.GetMetric(name)
 	require.NoError(t, err)
-	metricdatatest.AssertEqual(t, want, got, opts...)
+	metricdatatest.AssertEqual(t, want, got, mdOpts...)
 }
 
-func AssertEqualExporterSentMetricPoints(t *testing.T, tt *componenttest.Telemetry, dps []metricdata.DataPoint[int64], opts ...metricdatatest.Option) {
+func AssertEqualExporterSentMetricPoints(t *testing.T, tt *componenttest.Telemetry, dps []metricdata.DataPoint[int64], opts ...any) {
+	var assertOpts []AssertOption
+	var mdOpts []metricdatatest.Option
+	for _, o := range opts {
+		switch v := o.(type) {
+		case AssertOption:
+			assertOpts = append(assertOpts, v)
+		case metricdatatest.Option:
+			mdOpts = append(mdOpts, v)
+		default:
+			require.Failf(t, "unexpected option type", "%T", o)
+		}
+	}
+	name := resolveMetricName("otelcol_exporter_sent_metric_points", assertOpts)
 	want := metricdata.Metrics{
-		Name:        "otelcol_exporter_sent_metric_points",
+		Name:        name,
 		Description: "Number of metric points successfully sent to destination. [Alpha]",
 		Unit:        "{datapoint}",
 		Data: metricdata.Sum[int64]{
@@ -241,14 +480,27 @@ func AssertEqualExporterSentMetricPoints(t *testing.T, tt *componenttest.Telemet
 			DataPoints:  dps,
 		},
 	}
-	got, err := tt.GetMetric("otelcol_exporter_sent_metric_points")
+	got, err := tt.GetMetric(name)
 	require.NoError(t, err)
-	metricdatatest.AssertEqual(t, want, got, opts...)
+	metricdatatest.AssertEqual(t, want, got, mdOpts...)
 }
 
-func AssertEqualExporterSentProfileSamples(t *testing.T, tt *componenttest.Telemetry, dps []metricdata.DataPoint[int64], opts ...metricdatatest.Option) {
+func AssertEqualExporterSentProfileSamples(t *testing.T, tt *componenttest.Telemetry, dps []metricdata.DataPoint[int64], opts ...any) {
+	var assertOpts []AssertOption
+	var mdOpts []metricdatatest.Option
+	for _, o := range opts {
+		switch v := o.(type) {
+		case AssertOption:
+			assertOpts = append(assertOpts, v)
+		case metricdatatest.Option:
+			mdOpts = append(mdOpts, v)
+		default:
+			require.Failf(t, "unexpected option type", "%T", o)
+		}
+	}
+	name := resolveMetricName("otelcol_exporter_sent_profile_samples", assertOpts)
 	want := metricdata.Metrics{
-		Name:        "otelcol_exporter_sent_profile_samples",
+		Name:        name,
 		Description: "Number of profile samples successfully sent to destination. [Development]",
 		Unit:        "{sample}",
 		Data: metricdata.Sum[int64]{
@@ -257,14 +509,27 @@ func AssertEqualExporterSentProfileSamples(t *testing.T, tt *componenttest.Telem
 			DataPoints:  dps,
 		},
 	}
-	got, err := tt.GetMetric("otelcol_exporter_sent_profile_samples")
+	got, err := tt.GetMetric(name)
 	require.NoError(t, err)
-	metricdatatest.AssertEqual(t, want, got, opts...)
+	metricdatatest.AssertEqual(t, want, got, mdOpts...)
 }
 
-func AssertEqualExporterSentSpans(t *testing.T, tt *componenttest.Telemetry, dps []metricdata.DataPoint[int64], opts ...metricdatatest.Option) {
+func AssertEqualExporterSentSpans(t *testing.T, tt *componenttest.Telemetry, dps []metricdata.DataPoint[int64], opts ...any) {
+	var assertOpts []AssertOption
+	var mdOpts []metricdatatest.Option
+	for _, o := range opts {
+		switch v := o.(type) {
+		case AssertOption:
+			assertOpts = append(assertOpts, v)
+		case metricdatatest.Option:
+			mdOpts = append(mdOpts, v)
+		default:
+			require.Failf(t, "unexpected option type", "%T", o)
+		}
+	}
+	name := resolveMetricName("otelcol_exporter_sent_spans", assertOpts)
 	want := metricdata.Metrics{
-		Name:        "otelcol_exporter_sent_spans",
+		Name:        name,
 		Description: "Number of spans successfully sent to destination. [Alpha]",
 		Unit:        "{span}",
 		Data: metricdata.Sum[int64]{
@@ -273,7 +538,7 @@ func AssertEqualExporterSentSpans(t *testing.T, tt *componenttest.Telemetry, dps
 			DataPoints:  dps,
 		},
 	}
-	got, err := tt.GetMetric("otelcol_exporter_sent_spans")
+	got, err := tt.GetMetric(name)
 	require.NoError(t, err)
-	metricdatatest.AssertEqual(t, want, got, opts...)
+	metricdatatest.AssertEqual(t, want, got, mdOpts...)
 }

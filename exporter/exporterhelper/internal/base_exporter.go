@@ -16,6 +16,7 @@ import (
 	"go.opentelemetry.io/collector/config/configretry"
 	"go.opentelemetry.io/collector/consumer"
 	"go.opentelemetry.io/collector/exporter"
+	"go.opentelemetry.io/collector/exporter/exporterhelper/internal/kindtelemetry"
 	"go.opentelemetry.io/collector/exporter/exporterhelper/internal/queuebatch"
 	"go.opentelemetry.io/collector/exporter/exporterhelper/internal/request"
 	"go.opentelemetry.io/collector/exporter/exporterhelper/internal/sender"
@@ -52,12 +53,15 @@ type BaseExporter struct {
 
 	queueBatchSettings queuebatch.Settings[request.Request]
 	queueCfg           configoptional.Optional[queuebatch.Config]
+
+	kindID kindtelemetry.Identity
 }
 
 func NewBaseExporter(set exporter.Settings, signal pipeline.Signal, pusher sender.SendFunc[request.Request], options ...Option) (*BaseExporter, error) {
 	be := &BaseExporter{
 		Set:        set,
 		timeoutCfg: NewDefaultTimeoutConfig(),
+		kindID:     kindtelemetry.Default(),
 	}
 
 	for _, op := range options {
@@ -81,7 +85,7 @@ func NewBaseExporter(set exporter.Settings, signal pipeline.Signal, pusher sende
 	}
 
 	var err error
-	be.firstSender, err = newObsReportSender(set, signal, be.ExtraAttrs, be.firstSender)
+	be.firstSender, err = newObsReportSender(set, signal, be.ExtraAttrs, be.kindID, be.firstSender)
 	if err != nil {
 		return nil, err
 	}
@@ -97,6 +101,7 @@ func NewBaseExporter(set exporter.Settings, signal pipeline.Signal, pusher sende
 			Signal:    signal,
 			ID:        set.ID,
 			Telemetry: set.TelemetrySettings,
+			KindID:    be.kindID,
 		}
 		be.QueueSender, err = NewQueueSender(qSet, *be.queueCfg.Get(), be.ExportFailureMessage, be.firstSender)
 		if err != nil {
@@ -258,6 +263,28 @@ func WithAttributes(attrs ...attribute.KeyValue) Option {
 func WithQueueBatchSettings(set queuebatch.Settings[request.Request]) Option {
 	return func(o *BaseExporter) error {
 		o.queueBatchSettings = set
+		return nil
+	}
+}
+
+// WithTelemetryComponentKind selects the component kind under which this
+// exporterhelper instance reports telemetry. The default is
+// component.KindExporter, which preserves the historical
+// "otelcol_exporter_*" metric names, the "exporter" metric attribute, and the
+// "exporter/<id>/<signal>" span names. Passing component.KindProcessor
+// rewrites those to "otelcol_processor_*", "processor", and
+// "processor/<id>/<signal>" respectively so that exporterhelper's queue and
+// batch logic can be reused inside a processor.
+//
+// Only the zero-value Kind, KindExporter, and KindProcessor are accepted in
+// Phase 1; any other Kind value causes the option to return an error.
+func WithTelemetryComponentKind(kind component.Kind) Option {
+	return func(o *BaseExporter) error {
+		id, err := kindtelemetry.ForKind(kind)
+		if err != nil {
+			return err
+		}
+		o.kindID = id
 		return nil
 	}
 }

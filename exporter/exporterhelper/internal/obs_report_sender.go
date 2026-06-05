@@ -19,6 +19,7 @@ import (
 	"go.opentelemetry.io/collector/consumer/consumererror"
 	"go.opentelemetry.io/collector/exporter"
 	"go.opentelemetry.io/collector/exporter/exporterhelper/internal/experr"
+	"go.opentelemetry.io/collector/exporter/exporterhelper/internal/kindtelemetry"
 	"go.opentelemetry.io/collector/exporter/exporterhelper/internal/metadata"
 	"go.opentelemetry.io/collector/exporter/exporterhelper/internal/queuebatch"
 	"go.opentelemetry.io/collector/exporter/exporterhelper/internal/request"
@@ -32,6 +33,9 @@ const (
 	spanNameSep = "/"
 
 	// ExporterKey used to identify exporters in metrics and traces.
+	// Deprecated: use the AttributeKey field of a kindtelemetry.Identity
+	// instead; this constant is preserved for any out-of-tree references and
+	// always returns the exporter-kind attribute key.
 	ExporterKey = "exporter"
 
 	// DataTypeKey used to identify the data type in the queue size metric.
@@ -61,17 +65,17 @@ type obsReportSender[K request.Request] struct {
 	next               sender.Sender[K]
 }
 
-func newObsReportSender[K request.Request](set exporter.Settings, signal pipeline.Signal, extraAttrs []attribute.KeyValue, next sender.Sender[K]) (sender.Sender[K], error) {
-	telemetryBuilder, err := metadata.NewTelemetryBuilder(set.TelemetrySettings)
+func newObsReportSender[K request.Request](set exporter.Settings, signal pipeline.Signal, extraAttrs []attribute.KeyValue, kindID kindtelemetry.Identity, next sender.Sender[K]) (sender.Sender[K], error) {
+	telemetryBuilder, err := metadata.NewTelemetryBuilder(set.TelemetrySettings, kindID.TelemetryBuilderOptions()...)
 	if err != nil {
 		return nil, err
 	}
 
 	idStr := set.ID.String()
-	expAttr := attribute.String(ExporterKey, idStr)
+	expAttr := attribute.String(kindID.AttributeKey, idStr)
 
 	or := &obsReportSender[K]{
-		spanName:           ExporterKey + spanNameSep + idStr + spanNameSep + signal.String(),
+		spanName:           kindID.SpanNamespace + spanNameSep + idStr + spanNameSep + signal.String(),
 		tracer:             metadata.Tracer(set.TelemetrySettings),
 		spanAttrs:          trace.WithAttributes(expAttr, attribute.String(DataTypeKey, signal.String())),
 		metricAttr:         metric.WithAttributeSet(attribute.NewSet(append(extraAttrs, expAttr)...)),
