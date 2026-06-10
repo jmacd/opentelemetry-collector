@@ -388,15 +388,6 @@ We will wait another +6 releases (~3 months).
     Custom builds that still reference it must move to
     `queuebatchprocessor` or vendor the component themselves.
 
-## Additional work items
-
-Items noted in this document that should be tracked separately,
-accomplished during Phase 1:
-
-- Reject `wait_for_result: true` combined with a configured storage
-  extension at configuration validation time (see "Recommendation: no
-  error propagation by default" above).
-
 ## Conclusion
 
 At the end, we can close a whole bunch of issues going back to
