@@ -44,6 +44,10 @@ func (fq *fakeQueue[T]) Offer(context.Context, T) error {
 	return fq.offerErr
 }
 
+func (fq *fakeQueue[T]) Shutdown(context.Context) error {
+	return nil
+}
+
 func newFakeQueue[T request.Request](offerErr error, size, capacity int64) Queue[T] {
 	return &fakeQueue[T]{offerErr: offerErr, size: size, capacity: capacity}
 }
@@ -358,4 +362,74 @@ func TestObsQueueProfilesBatchSize(t *testing.T) {
 				Sum:          22,
 			},
 		}, metricdatatest.IgnoreTimestamp())
+}
+
+// fakeObsMetrics records the calls made by the queue, standing in for the
+// telemetry a component reusing the queue would inject.
+type fakeObsMetrics struct {
+	batchSize      []int64
+	batchSizeBytes []int64
+	enqueueFailed  []int64
+	observeSize    func() int64
+	observeCap     func() int64
+	shutdownCalled bool
+}
+
+func (f *fakeObsMetrics) RecordBatchSendSize(_ context.Context, items int64) {
+	f.batchSize = append(f.batchSize, items)
+}
+
+func (f *fakeObsMetrics) RecordBatchSendSizeBytes(_ context.Context, bytes int64) {
+	f.batchSizeBytes = append(f.batchSizeBytes, bytes)
+}
+
+func (f *fakeObsMetrics) RecordEnqueueFailure(_ context.Context, items int64) {
+	f.enqueueFailed = append(f.enqueueFailed, items)
+}
+
+func (f *fakeObsMetrics) RegisterQueueSize(observe func() int64) error {
+	f.observeSize = observe
+	return nil
+}
+
+func (f *fakeObsMetrics) RegisterQueueCapacity(observe func() int64) error {
+	f.observeCap = observe
+	return nil
+}
+
+func (f *fakeObsMetrics) Shutdown() {
+	f.shutdownCalled = true
+}
+
+func TestObsQueueInjectedObsMetrics(t *testing.T) {
+	tt := componenttest.NewTelemetry()
+	t.Cleanup(func() { require.NoError(t, tt.Shutdown(context.Background())) })
+
+	om := &fakeObsMetrics{}
+	te, err := newObsQueue[request.Request](Settings[request.Request]{
+		Signal:     pipeline.SignalLogs,
+		ID:         exporterID,
+		Telemetry:  tt.NewTelemetrySettings(),
+		ObsMetrics: om,
+	}, newFakeQueue[request.Request](errors.New("my error"), 7, 9))
+	require.NoError(t, err)
+
+	// The injected ObsMetrics observes the delegate's size and capacity.
+	require.NotNil(t, om.observeSize)
+	require.NotNil(t, om.observeCap)
+	require.Equal(t, int64(7), om.observeSize())
+	require.Equal(t, int64(9), om.observeCap())
+
+	require.Error(t, te.Offer(context.Background(), &requesttest.FakeRequest{Items: 2, Bytes: 100}))
+	require.Equal(t, []int64{2}, om.batchSize)
+	require.Equal(t, []int64{100}, om.batchSizeBytes)
+	require.Equal(t, []int64{2}, om.enqueueFailed)
+
+	require.NoError(t, te.Shutdown(context.Background()))
+	require.True(t, om.shutdownCalled)
+
+	// The default exporter metrics are not emitted when ObsMetrics is injected.
+	var rm metricdata.ResourceMetrics
+	require.NoError(t, tt.Reader.Collect(context.Background(), &rm))
+	require.Empty(t, rm.ScopeMetrics)
 }

@@ -76,6 +76,10 @@ type Settings[T request.Request] struct {
 	Encoding         Encoding[T]
 	ID               component.ID
 	Telemetry        component.TelemetrySettings
+	// ObsMetrics, when non-nil, is used to report the queue's metrics. When nil,
+	// the exporter's default metrics are used. It allows a component reusing the
+	// queue to report metrics under its own names.
+	ObsMetrics ObsMetrics
 }
 
 func NewQueue[T request.Request](set Settings[T], next ConsumeFunc[T]) (Queue[T], error) {

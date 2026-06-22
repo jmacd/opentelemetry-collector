@@ -22,12 +22,20 @@ type Settings[T any] struct {
 	MergeCtx         func(context.Context, context.Context) context.Context
 }
 
+// ObsMetrics reports the telemetry produced by the queue. A component reusing
+// the QueueBatch supplies its own implementation so its metrics are named for
+// that component; see queue.ObsMetrics.
+type ObsMetrics = queue.ObsMetrics
+
 // AllSettings defines settings for creating a QueueBatch.
 type AllSettings[T any] struct {
 	Settings[T]
 	Signal    pipeline.Signal
 	ID        component.ID
 	Telemetry component.TelemetrySettings
+	// ObsMetrics, when non-nil, overrides the default exporter metrics reported
+	// by the queue. It is set by a component reusing the QueueBatch.
+	ObsMetrics ObsMetrics
 }
 
 type QueueBatch struct {
@@ -68,6 +76,7 @@ func NewQueueBatch(
 		Encoding:         set.Encoding,
 		ID:               set.ID,
 		Telemetry:        set.Telemetry,
+		ObsMetrics:       set.ObsMetrics,
 	}, b.Consume)
 	if err != nil {
 		return nil, err
