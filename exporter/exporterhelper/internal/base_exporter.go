@@ -19,6 +19,7 @@ import (
 	"go.opentelemetry.io/collector/exporter/exporterhelper/internal/queuebatch"
 	"go.opentelemetry.io/collector/exporter/exporterhelper/internal/request"
 	"go.opentelemetry.io/collector/exporter/exporterhelper/internal/sender"
+	"go.opentelemetry.io/collector/pdata/xpdata/payload"
 	"go.opentelemetry.io/collector/pipeline"
 )
 
@@ -44,6 +45,7 @@ type BaseExporter struct {
 	firstSender sender.Sender[request.Request]
 
 	ConsumerOptions []consumer.Option
+	PayloadPusher   func(context.Context, *payload.Payload) error
 
 	ExtraAttrs []attribute.KeyValue
 
@@ -67,6 +69,11 @@ func NewBaseExporter(set exporter.Settings, signal pipeline.Signal, pusher sende
 	}
 
 	// Consumer Sender is always initialized.
+	if be.PayloadPusher != nil {
+		pusher = func(ctx context.Context, req request.Request) error {
+			return be.PayloadPusher(ctx, req.(*queuebatch.PayloadRequest).Data)
+		}
+	}
 	be.firstSender = sender.NewSender(pusher)
 
 	// Next setup the timeout Sender since we want the timeout to control only the export functionality.

@@ -84,6 +84,7 @@ func createLogs(ctx context.Context, set exporter.Settings, config component.Con
 	debug := newDebugExporter(exporterLogger, cfg.Verbosity)
 	return exporterhelper.NewLogs(ctx, set, config,
 		debug.pushLogs,
+		exporterhelper.WithLogsPayload(debug.pushLogsPayload),
 		exporterhelper.WithCapabilities(consumer.Capabilities{MutatesData: false}),
 		exporterhelper.WithQueue(cfg.QueueConfig),
 		exporterhelper.WithTimeout(exporterhelper.TimeoutConfig{Timeout: 0}),

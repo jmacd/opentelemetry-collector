@@ -117,6 +117,7 @@ func createLogs(
 	oCfg := cfg.(*Config)
 	return exporterhelper.NewLogs(ctx, set, cfg,
 		oce.pushLogs,
+		exporterhelper.WithLogsPayload(oce.pushLogsPayload),
 		exporterhelper.WithCapabilities(consumer.Capabilities{MutatesData: false}),
 		exporterhelper.WithTimeout(oCfg.TimeoutConfig),
 		exporterhelper.WithRetry(oCfg.RetryConfig),

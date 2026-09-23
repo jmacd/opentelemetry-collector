@@ -1,7 +1,7 @@
 // Copyright The OpenTelemetry Authors
 // SPDX-License-Identifier: Apache-2.0
 
-package logs
+package otap
 
 import (
 	"bytes"
@@ -20,10 +20,10 @@ import (
 	"github.com/stretchr/testify/require"
 	"google.golang.org/protobuf/encoding/protowire"
 
-	"go.opentelemetry.io/collector/internal/pdataprototype/payload"
 	"go.opentelemetry.io/collector/pdata/pcommon"
 	"go.opentelemetry.io/collector/pdata/plog"
 	"go.opentelemetry.io/collector/pdata/plog/plogotlp"
+	"go.opentelemetry.io/collector/pdata/xpdata/payload"
 )
 
 func testRegistry(tb testing.TB) (*payload.Registry, *ArrowCodec) {
@@ -139,7 +139,7 @@ func TestConversions(t *testing.T) {
 				}
 				require.NoError(t, err)
 				defer p.Release()
-				require.Equal(t, n, p.ItemsCount())
+				require.Equal(t, n, mustCount(t, p))
 				got, err := ReadOnlyLogs(p)
 				require.NoError(t, err)
 				assert.True(t, got.IsReadOnly())
@@ -154,7 +154,7 @@ func TestConversions(t *testing.T) {
 				decoded, err := decodeRecords(rep)
 				require.NoError(t, err)
 				defer decoded.Release()
-				assert.Equal(t, normalized(want), normalized(decoded.(*Objects).data))
+				assert.Equal(t, normalized(want), normalized(decoded.(*Objects).Logs()))
 			})
 		}
 	}
@@ -190,14 +190,12 @@ func TestNativeMerge(t *testing.T) {
 			merged, err := reg.Merge(inputs...)
 			require.NoError(t, err)
 			defer merged.Release()
-			assert.Equal(t, 16, merged.ItemsCount())
+			assert.Equal(t, 16, mustCount(t, merged))
 			if format == ArrowFormat {
-				a, asErr := inputs[0].As(ArrowFormat)
-				require.NoError(t, asErr)
 				b, asErr := merged.As(ArrowFormat)
 				require.NoError(t, asErr)
-				require.Len(t, b.(*Records).Batches(), 2)
-				assert.Same(t, a.(*Records).Batches()[0][0].Record(), b.(*Records).Batches()[0][0].Record())
+				require.Len(t, b.(*Records).Batches(), 1)
+				assert.Equal(t, int64(16), b.(*Records).Batches()[0][0].Record().NumRows())
 			}
 			for _, p := range inputs {
 				p.Release()
@@ -238,7 +236,7 @@ func TestProtoOwnershipMutationAndPersistence(t *testing.T) {
 	restored, err := NewFromProto(reg, slices.Clone(stored))
 	require.NoError(t, err)
 	defer restored.Release()
-	assert.Equal(t, p.ItemsCount(), restored.ItemsCount())
+	assert.Equal(t, mustCount(t, p), mustCount(t, restored))
 	merged, err := reg.Merge(p, restored)
 	require.NoError(t, err)
 	defer merged.Release()
@@ -261,14 +259,18 @@ func TestMalformedAndUnsupported(t *testing.T) {
 	t.Parallel()
 	reg, arrow := testRegistry(t)
 	for _, buf := range [][]byte{{0xff}, {0x0a, 4}, {8, 1}, {0x0a, 2, 0x10, 1}, {0}} {
-		_, err := NewFromProto(reg, buf)
+		p, err := NewFromProto(reg, buf)
+		require.NoError(t, err)
+		_, err = p.ItemsCount()
 		require.Error(t, err)
+		p.Release()
 	}
 	// Valid request/resource/scope envelopes containing an invalid LogRecord.
 	p, err := NewFromProto(reg, []byte{0x0a, 5, 0x12, 3, 0x12, 1, 0xff})
 	require.NoError(t, err)
 	defer p.Release()
-	assert.Equal(t, 1, p.ItemsCount())
+	_, err = p.ItemsCount()
+	require.Error(t, err)
 	_, err = ReadOnlyLogs(p)
 	require.Error(t, err)
 	_, err = NewFromRecords(reg, [][]*record_message.RecordMessage{{nil}})
@@ -289,6 +291,14 @@ func TestMalformedAndUnsupported(t *testing.T) {
 	require.NoError(t, arrow.Close())
 	_, err = arrow.Codec().Encode(newObjects(fixture(1)))
 	require.ErrorContains(t, err, "closed")
+}
+
+func mustCount(tb testing.TB, p interface{ ItemsCount() (int, error) }) int {
+	count, err := p.ItemsCount()
+	if err != nil {
+		tb.Fatal(err)
+	}
+	return count
 }
 
 func TestEmptyGroupsAreNotSilentlyDropped(t *testing.T) {
@@ -324,7 +334,7 @@ func FuzzProtoCount(f *testing.F) {
 	f.Add([]byte{})
 	f.Add([]byte{0x0a, 5, 0x12, 3, 0x12, 1, 0xff})
 	f.Fuzz(func(t *testing.T, buf []byte) {
-		count, scanErr := countLogs(buf, 0)
+		count, scanErr := countProto(buf)
 		req := plogotlp.NewExportRequest()
 		if decodeErr := req.UnmarshalProto(buf); scanErr == nil && decodeErr == nil {
 			require.Equal(t, req.Logs().LogRecordCount(), count)

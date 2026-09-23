@@ -14,6 +14,7 @@ import (
 	"google.golang.org/grpc/status"
 
 	"go.opentelemetry.io/collector/internal/statusutil"
+	"go.opentelemetry.io/collector/pdata/xpdata/plogpayload"
 	"go.opentelemetry.io/collector/receiver/otlpreceiver/internal/errors"
 	"go.opentelemetry.io/collector/receiver/otlpreceiver/internal/logs"
 	"go.opentelemetry.io/collector/receiver/otlpreceiver/internal/metrics"
@@ -96,6 +97,21 @@ func handleLogs(resp http.ResponseWriter, req *http.Request, logsReceiver *logs.
 
 	body, ok := readAndCloseBody(resp, req, enc)
 	if !ok {
+		return
+	}
+
+	if plogpayload.FeatureGate.IsEnabled() && enc.contentType() == pbContentType {
+		response, err := logsReceiver.ExportProto(req.Context(), body)
+		if err != nil {
+			writeError(resp, enc, err, http.StatusInternalServerError)
+			return
+		}
+		msg, err := enc.marshalLogsResponse(response)
+		if err != nil {
+			writeError(resp, enc, err, http.StatusInternalServerError)
+			return
+		}
+		writeResponse(resp, enc.contentType(), http.StatusOK, msg)
 		return
 	}
 

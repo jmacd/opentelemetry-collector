@@ -17,9 +17,40 @@ type testData struct {
 	releases atomic.Int32
 }
 
-func (d *testData) Format() Format  { return d.format }
-func (d *testData) ItemsCount() int { return d.items }
-func (d *testData) Release()        { d.releases.Add(1) }
+type unknownCount struct{ *testData }
+
+func (*unknownCount) ItemsCount() (int, error) { return 0, errors.New("requires object decoding") }
+
+func TestCountBecomesKnownAfterDecoding(t *testing.T) {
+	t.Parallel()
+	obj := &testData{format: "objects", items: 9}
+	reg, err := NewRegistry(Codec{Format: "objects"}, Codec{
+		Format: "deferred",
+		Decode: func(Representation) (Representation, error) { return obj, nil },
+		Encode: func(Representation) (Representation, error) { return nil, errors.New("unused") },
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	p, err := reg.New(&unknownCount{testData: &testData{format: "deferred"}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer p.Release()
+	if _, err := p.ItemsCount(); err == nil {
+		t.Fatal("predecoded count must report its failure")
+	}
+	if _, err := p.As("objects"); err != nil {
+		t.Fatal(err)
+	}
+	if n, err := p.ItemsCount(); err != nil || n != 9 {
+		t.Fatalf("post-decode count = %d, %v", n, err)
+	}
+}
+
+func (d *testData) Format() Format           { return d.format }
+func (d *testData) ItemsCount() (int, error) { return d.items, nil }
+func (d *testData) Release()                 { d.releases.Add(1) }
 
 func TestLazyConversionAndOwnership(t *testing.T) {
 	t.Parallel()
@@ -162,7 +193,7 @@ func TestRegistrationAndMergeErrors(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	for _, data := range []Representation{nil, &testData{format: "unknown"}, &testData{format: "objects", items: -1}} {
+	for _, data := range []Representation{nil, &testData{format: "unknown"}} {
 		if _, newErr := r.New(data); newErr == nil {
 			t.Fatal("invalid representation accepted")
 		}

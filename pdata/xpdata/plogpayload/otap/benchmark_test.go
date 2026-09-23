@@ -1,7 +1,7 @@
 // Copyright The OpenTelemetry Authors
 // SPDX-License-Identifier: Apache-2.0
 
-package logs
+package otap
 
 import (
 	"fmt"
@@ -9,9 +9,9 @@ import (
 
 	"github.com/stretchr/testify/require"
 
-	"go.opentelemetry.io/collector/internal/pdataprototype/payload"
 	"go.opentelemetry.io/collector/pdata/plog"
 	"go.opentelemetry.io/collector/pdata/plog/plogotlp"
+	"go.opentelemetry.io/collector/pdata/xpdata/payload"
 )
 
 var benchmarkCount int
@@ -67,7 +67,7 @@ func BenchmarkOTLP(b *testing.B) {
 					if err != nil {
 						b.Fatal(err)
 					}
-					benchmarkCount = p.ItemsCount() + len(out)
+					benchmarkCount = mustCount(b, p) + len(out)
 					p.Release()
 				}
 				if benchmarkCount != size+len(buf) {
@@ -104,7 +104,7 @@ func BenchmarkArrow(b *testing.B) {
 						if encodeErr != nil {
 							b.Fatal(encodeErr)
 						}
-						benchmarkCount = out.ItemsCount()
+						benchmarkCount = mustCount(b, out)
 						out.Release()
 						objects.Release()
 						owned.Release()
@@ -128,7 +128,7 @@ func BenchmarkArrow(b *testing.B) {
 					if err != nil {
 						b.Fatal(err)
 					}
-					benchmarkCount = out.ItemsCount()
+					benchmarkCount = mustCount(b, out)
 					p.Release()
 				}
 				if benchmarkCount != size {
@@ -168,7 +168,7 @@ func BenchmarkBatch(b *testing.B) {
 						if err != nil {
 							b.Fatal(err)
 						}
-						benchmarkCount = p.ItemsCount()
+						benchmarkCount = mustCount(b, p)
 						p.Release()
 						continue
 					}
@@ -181,7 +181,7 @@ func BenchmarkBatch(b *testing.B) {
 						var decoded plog.Logs
 						if format == ProtoFormat {
 							req := plogotlp.NewExportRequest()
-							err = req.UnmarshalProto(rep.(*Proto).data)
+							err = req.UnmarshalProto(rep.(*Proto).Bytes())
 							decoded = req.Logs()
 						} else {
 							decoded, err = decodeArrow(rep.(*Records))
@@ -201,7 +201,7 @@ func BenchmarkBatch(b *testing.B) {
 					if err != nil {
 						b.Fatal(err)
 					}
-					benchmarkCount = out.ItemsCount()
+					benchmarkCount = mustCount(b, out)
 					out.Release()
 				}
 				if benchmarkCount != 1024 {

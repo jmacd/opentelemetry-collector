@@ -1,116 +1,116 @@
 goos: linux
 goarch: amd64
-pkg: go.opentelemetry.io/collector/internal/pdataprototype/logs
+pkg: go.opentelemetry.io/collector/pdata/xpdata/plogpayload/otap
 cpu: Intel(R) Core(TM) Ultra 7 165H
-BenchmarkOTLP/1/eager         	  354733	      1677 ns/op	 186.05 MB/s	    1448 B/op	      34 allocs/op
-BenchmarkOTLP/1/eager         	  347646	      1686 ns/op	 185.06 MB/s	    1448 B/op	      34 allocs/op
-BenchmarkOTLP/1/eager         	  398412	      1620 ns/op	 192.60 MB/s	    1448 B/op	      34 allocs/op
-BenchmarkOTLP/1/eager         	  373392	      1723 ns/op	 181.04 MB/s	    1448 B/op	      34 allocs/op
-BenchmarkOTLP/1/eager         	  373110	      1673 ns/op	 186.52 MB/s	    1448 B/op	      34 allocs/op
-BenchmarkOTLP/1/passthrough   	 1592988	       378.6 ns/op	 824.07 MB/s	     560 B/op	       4 allocs/op
-BenchmarkOTLP/1/passthrough   	 1467661	       401.8 ns/op	 776.59 MB/s	     560 B/op	       4 allocs/op
-BenchmarkOTLP/1/passthrough   	 1545879	       389.7 ns/op	 800.60 MB/s	     560 B/op	       4 allocs/op
-BenchmarkOTLP/1/passthrough   	 1519094	       392.1 ns/op	 795.75 MB/s	     560 B/op	       4 allocs/op
-BenchmarkOTLP/1/passthrough   	 1535320	       385.7 ns/op	 809.00 MB/s	     560 B/op	       4 allocs/op
-BenchmarkOTLP/1/materialize   	  297885	      2089 ns/op	 149.32 MB/s	    1744 B/op	      40 allocs/op
-BenchmarkOTLP/1/materialize   	  251773	      2087 ns/op	 149.48 MB/s	    1744 B/op	      40 allocs/op
-BenchmarkOTLP/1/materialize   	  309976	      1982 ns/op	 157.40 MB/s	    1744 B/op	      40 allocs/op
-BenchmarkOTLP/1/materialize   	  302323	      2072 ns/op	 150.58 MB/s	    1744 B/op	      40 allocs/op
-BenchmarkOTLP/1/materialize   	  276770	      2134 ns/op	 146.19 MB/s	    1744 B/op	      40 allocs/op
-BenchmarkOTLP/128/eager       	    4514	    121457 ns/op	 165.22 MB/s	  102104 B/op	    2443 allocs/op
-BenchmarkOTLP/128/eager       	    4098	    124270 ns/op	 161.48 MB/s	  102104 B/op	    2443 allocs/op
-BenchmarkOTLP/128/eager       	    5079	    120961 ns/op	 165.90 MB/s	  102104 B/op	    2443 allocs/op
-BenchmarkOTLP/128/eager       	    5440	    120733 ns/op	 166.21 MB/s	  102104 B/op	    2443 allocs/op
-BenchmarkOTLP/128/eager       	    4986	    121491 ns/op	 165.17 MB/s	  102104 B/op	    2443 allocs/op
-BenchmarkOTLP/128/passthrough 	  461110	      1277 ns/op	15709.69 MB/s	     560 B/op	       4 allocs/op
-BenchmarkOTLP/128/passthrough 	  495298	      1242 ns/op	16156.51 MB/s	     560 B/op	       4 allocs/op
-BenchmarkOTLP/128/passthrough 	  467114	      1317 ns/op	15237.19 MB/s	     560 B/op	       4 allocs/op
-BenchmarkOTLP/128/passthrough 	  441782	      1325 ns/op	15141.54 MB/s	     560 B/op	       4 allocs/op
-BenchmarkOTLP/128/passthrough 	  414122	      1260 ns/op	15926.83 MB/s	     560 B/op	       4 allocs/op
-BenchmarkOTLP/128/materialize 	    6646	    108662 ns/op	 184.67 MB/s	   82224 B/op	    2449 allocs/op
-BenchmarkOTLP/128/materialize 	    5276	    107116 ns/op	 187.34 MB/s	   82224 B/op	    2449 allocs/op
-BenchmarkOTLP/128/materialize 	    5330	    110604 ns/op	 181.43 MB/s	   82224 B/op	    2449 allocs/op
-BenchmarkOTLP/128/materialize 	    6182	    108223 ns/op	 185.42 MB/s	   82224 B/op	    2449 allocs/op
-BenchmarkOTLP/128/materialize 	    6032	    106096 ns/op	 189.14 MB/s	   82224 B/op	    2449 allocs/op
-BenchmarkOTLP/1024/eager      	     612	    987800 ns/op	 161.60 MB/s	  812248 B/op	   19249 allocs/op
-BenchmarkOTLP/1024/eager      	     620	    991684 ns/op	 160.96 MB/s	  812248 B/op	   19249 allocs/op
-BenchmarkOTLP/1024/eager      	     608	    964229 ns/op	 165.55 MB/s	  812248 B/op	   19249 allocs/op
-BenchmarkOTLP/1024/eager      	     560	   1000764 ns/op	 159.50 MB/s	  812248 B/op	   19249 allocs/op
-BenchmarkOTLP/1024/eager      	     594	    988885 ns/op	 161.42 MB/s	  812248 B/op	   19249 allocs/op
-BenchmarkOTLP/1024/passthrough         	   72026	      8312 ns/op	19203.56 MB/s	     560 B/op	       4 allocs/op
-BenchmarkOTLP/1024/passthrough         	   71529	      8277 ns/op	19284.68 MB/s	     560 B/op	       4 allocs/op
-BenchmarkOTLP/1024/passthrough         	   69908	      8211 ns/op	19439.33 MB/s	     560 B/op	       4 allocs/op
-BenchmarkOTLP/1024/passthrough         	   74019	      8399 ns/op	19006.15 MB/s	     560 B/op	       4 allocs/op
-BenchmarkOTLP/1024/passthrough         	   71815	      8298 ns/op	19235.53 MB/s	     560 B/op	       4 allocs/op
-BenchmarkOTLP/1024/materialize         	     630	    930114 ns/op	 171.62 MB/s	  649010 B/op	   19255 allocs/op
-BenchmarkOTLP/1024/materialize         	     666	    903957 ns/op	 176.58 MB/s	  649010 B/op	   19255 allocs/op
-BenchmarkOTLP/1024/materialize         	     673	    932091 ns/op	 171.25 MB/s	  649010 B/op	   19255 allocs/op
-BenchmarkOTLP/1024/materialize         	     666	    907920 ns/op	 175.81 MB/s	  649010 B/op	   19255 allocs/op
-BenchmarkOTLP/1024/materialize         	     705	    847938 ns/op	 188.25 MB/s	  649010 B/op	   19255 allocs/op
-BenchmarkArrow/1/eager                 	    9908	     60701 ns/op	   54531 B/op	     710 allocs/op
-BenchmarkArrow/1/eager                 	    9004	     62132 ns/op	   54531 B/op	     710 allocs/op
-BenchmarkArrow/1/eager                 	   10000	     61735 ns/op	   54531 B/op	     710 allocs/op
-BenchmarkArrow/1/eager                 	    9019	     62626 ns/op	   54531 B/op	     710 allocs/op
-BenchmarkArrow/1/eager                 	    9376	     62178 ns/op	   54531 B/op	     710 allocs/op
-BenchmarkArrow/1/passthrough           	 1000000	       515.5 ns/op	     616 B/op	       6 allocs/op
-BenchmarkArrow/1/passthrough           	 1000000	       518.3 ns/op	     616 B/op	       6 allocs/op
-BenchmarkArrow/1/passthrough           	 1000000	       500.1 ns/op	     616 B/op	       6 allocs/op
-BenchmarkArrow/1/passthrough           	 1000000	       535.4 ns/op	     616 B/op	       6 allocs/op
-BenchmarkArrow/1/passthrough           	 1000000	       502.2 ns/op	     616 B/op	       6 allocs/op
-BenchmarkArrow/1/materialize           	   97242	      6018 ns/op	    4136 B/op	      98 allocs/op
-BenchmarkArrow/1/materialize           	   97716	      5901 ns/op	    4136 B/op	      98 allocs/op
-BenchmarkArrow/1/materialize           	   99158	      6412 ns/op	    4136 B/op	      98 allocs/op
-BenchmarkArrow/1/materialize           	   89229	      6361 ns/op	    4136 B/op	      98 allocs/op
-BenchmarkArrow/1/materialize           	   87843	      6243 ns/op	    4136 B/op	      98 allocs/op
-BenchmarkArrow/128/eager               	     775	    786366 ns/op	  440940 B/op	   10227 allocs/op
-BenchmarkArrow/128/eager               	     770	    783592 ns/op	  440941 B/op	   10227 allocs/op
-BenchmarkArrow/128/eager               	     783	    780361 ns/op	  440941 B/op	   10227 allocs/op
-BenchmarkArrow/128/eager               	     781	    769156 ns/op	  440941 B/op	   10227 allocs/op
-BenchmarkArrow/128/eager               	     751	    786271 ns/op	  440941 B/op	   10227 allocs/op
-BenchmarkArrow/128/passthrough         	 1000000	       535.6 ns/op	     616 B/op	       6 allocs/op
-BenchmarkArrow/128/passthrough         	 1000000	       532.1 ns/op	     616 B/op	       6 allocs/op
-BenchmarkArrow/128/passthrough         	 1000000	       534.8 ns/op	     616 B/op	       6 allocs/op
-BenchmarkArrow/128/passthrough         	 1000000	       528.4 ns/op	     616 B/op	       6 allocs/op
-BenchmarkArrow/128/passthrough         	 1000000	       525.0 ns/op	     616 B/op	       6 allocs/op
-BenchmarkArrow/128/materialize         	    1784	    350223 ns/op	  252032 B/op	    5891 allocs/op
-BenchmarkArrow/128/materialize         	    1623	    360226 ns/op	  252032 B/op	    5891 allocs/op
-BenchmarkArrow/128/materialize         	    1666	    349108 ns/op	  252032 B/op	    5891 allocs/op
-BenchmarkArrow/128/materialize         	    1572	    355880 ns/op	  252032 B/op	    5891 allocs/op
-BenchmarkArrow/128/materialize         	    1737	    355972 ns/op	  252032 B/op	    5891 allocs/op
-BenchmarkArrow/1024/eager              	      98	   6476390 ns/op	 3172169 B/op	   77096 allocs/op
-BenchmarkArrow/1024/eager              	     100	   6280571 ns/op	 3172168 B/op	   77096 allocs/op
-BenchmarkArrow/1024/eager              	      97	   6307000 ns/op	 3172169 B/op	   77096 allocs/op
-BenchmarkArrow/1024/eager              	     100	   6097521 ns/op	 3172168 B/op	   77096 allocs/op
-BenchmarkArrow/1024/eager              	     100	   6224771 ns/op	 3172168 B/op	   77096 allocs/op
-BenchmarkArrow/1024/passthrough        	  983392	       557.1 ns/op	     616 B/op	       6 allocs/op
-BenchmarkArrow/1024/passthrough        	  895138	       575.5 ns/op	     616 B/op	       6 allocs/op
-BenchmarkArrow/1024/passthrough        	  952761	       555.2 ns/op	     616 B/op	       6 allocs/op
-BenchmarkArrow/1024/passthrough        	 1000000	       561.1 ns/op	     616 B/op	       6 allocs/op
-BenchmarkArrow/1024/passthrough        	  970450	       579.1 ns/op	     616 B/op	       6 allocs/op
-BenchmarkArrow/1024/materialize        	     193	   2877384 ns/op	 1996562 B/op	   46450 allocs/op
-BenchmarkArrow/1024/materialize        	     230	   2761706 ns/op	 1996562 B/op	   46450 allocs/op
-BenchmarkArrow/1024/materialize        	     214	   2821767 ns/op	 1996562 B/op	   46450 allocs/op
-BenchmarkArrow/1024/materialize        	     205	   2878431 ns/op	 1996563 B/op	   46450 allocs/op
-BenchmarkArrow/1024/materialize        	     202	   2975961 ns/op	 1996562 B/op	   46450 allocs/op
-BenchmarkBatch/otlp/protobuf/logs/v1/eager         	     579	   1036642 ns/op	  817129 B/op	   19544 allocs/op
-BenchmarkBatch/otlp/protobuf/logs/v1/eager         	     606	   1108101 ns/op	  817129 B/op	   19544 allocs/op
-BenchmarkBatch/otlp/protobuf/logs/v1/eager         	     465	   1285754 ns/op	  817129 B/op	   19544 allocs/op
-BenchmarkBatch/otlp/protobuf/logs/v1/eager         	     571	   1075362 ns/op	  817129 B/op	   19544 allocs/op
-BenchmarkBatch/otlp/protobuf/logs/v1/eager         	     537	   1103527 ns/op	  817129 B/op	   19544 allocs/op
-BenchmarkBatch/otlp/protobuf/logs/v1/native        	   19617	     31192 ns/op	  164528 B/op	       6 allocs/op
-BenchmarkBatch/otlp/protobuf/logs/v1/native        	   18583	     31627 ns/op	  164528 B/op	       6 allocs/op
-BenchmarkBatch/otlp/protobuf/logs/v1/native        	   21020	     28169 ns/op	  164528 B/op	       6 allocs/op
-BenchmarkBatch/otlp/protobuf/logs/v1/native        	   21644	     29671 ns/op	  164528 B/op	       6 allocs/op
-BenchmarkBatch/otlp/protobuf/logs/v1/native        	   18853	     31328 ns/op	  164528 B/op	       6 allocs/op
-BenchmarkBatch/otap/arrow/logs/v1/eager            	     100	   5929578 ns/op	 3183540 B/op	   77156 allocs/op
-BenchmarkBatch/otap/arrow/logs/v1/eager            	      99	   6099146 ns/op	 3183564 B/op	   77156 allocs/op
-BenchmarkBatch/otap/arrow/logs/v1/eager            	     100	   5975465 ns/op	 3183528 B/op	   77156 allocs/op
-BenchmarkBatch/otap/arrow/logs/v1/eager            	      87	   6062558 ns/op	 3183914 B/op	   77156 allocs/op
-BenchmarkBatch/otap/arrow/logs/v1/eager            	      91	   5967944 ns/op	 3183784 B/op	   77156 allocs/op
-BenchmarkBatch/otap/arrow/logs/v1/native           	  492487	      1256 ns/op	    1048 B/op	       9 allocs/op
-BenchmarkBatch/otap/arrow/logs/v1/native           	  494314	      1273 ns/op	    1048 B/op	       9 allocs/op
-BenchmarkBatch/otap/arrow/logs/v1/native           	  444483	      1338 ns/op	    1048 B/op	       9 allocs/op
-BenchmarkBatch/otap/arrow/logs/v1/native           	  452637	      1369 ns/op	    1048 B/op	       9 allocs/op
-BenchmarkBatch/otap/arrow/logs/v1/native           	  421657	      1392 ns/op	    1048 B/op	       9 allocs/op
+BenchmarkOTLP/1/eager         	  300022	      1693 ns/op	 184.33 MB/s	    1448 B/op	      34 allocs/op
+BenchmarkOTLP/1/eager         	  418600	      1658 ns/op	 188.23 MB/s	    1448 B/op	      34 allocs/op
+BenchmarkOTLP/1/eager         	  309404	      1705 ns/op	 182.94 MB/s	    1448 B/op	      34 allocs/op
+BenchmarkOTLP/1/eager         	  366690	      2321 ns/op	 134.42 MB/s	    1448 B/op	      34 allocs/op
+BenchmarkOTLP/1/eager         	  248095	      2222 ns/op	 140.41 MB/s	    1448 B/op	      34 allocs/op
+BenchmarkOTLP/1/passthrough   	  469858	      1277 ns/op	 244.26 MB/s	     608 B/op	       4 allocs/op
+BenchmarkOTLP/1/passthrough   	  413686	      1503 ns/op	 207.64 MB/s	     608 B/op	       4 allocs/op
+BenchmarkOTLP/1/passthrough   	  514785	      1287 ns/op	 242.42 MB/s	     608 B/op	       4 allocs/op
+BenchmarkOTLP/1/passthrough   	  523599	      1282 ns/op	 243.40 MB/s	     608 B/op	       4 allocs/op
+BenchmarkOTLP/1/passthrough   	  521796	      1272 ns/op	 245.29 MB/s	     608 B/op	       4 allocs/op
+BenchmarkOTLP/1/materialize   	  197998	      2948 ns/op	 105.83 MB/s	    1792 B/op	      40 allocs/op
+BenchmarkOTLP/1/materialize   	  208402	      2917 ns/op	 106.98 MB/s	    1792 B/op	      40 allocs/op
+BenchmarkOTLP/1/materialize   	  194379	      2993 ns/op	 104.24 MB/s	    1792 B/op	      40 allocs/op
+BenchmarkOTLP/1/materialize   	  210177	      2961 ns/op	 105.38 MB/s	    1792 B/op	      40 allocs/op
+BenchmarkOTLP/1/materialize   	  206996	      3128 ns/op	  99.76 MB/s	    1792 B/op	      40 allocs/op
+BenchmarkOTLP/128/eager       	    6073	    122698 ns/op	 163.55 MB/s	  102104 B/op	    2443 allocs/op
+BenchmarkOTLP/128/eager       	    5038	    118055 ns/op	 169.98 MB/s	  102104 B/op	    2443 allocs/op
+BenchmarkOTLP/128/eager       	    5460	    118546 ns/op	 169.28 MB/s	  102104 B/op	    2443 allocs/op
+BenchmarkOTLP/128/eager       	    5089	    118630 ns/op	 169.16 MB/s	  102104 B/op	    2443 allocs/op
+BenchmarkOTLP/128/eager       	    5096	    120639 ns/op	 166.34 MB/s	  102104 B/op	    2443 allocs/op
+BenchmarkOTLP/128/passthrough 	   10000	     53780 ns/op	 373.13 MB/s	     608 B/op	       4 allocs/op
+BenchmarkOTLP/128/passthrough 	   10000	     54408 ns/op	 368.82 MB/s	     608 B/op	       4 allocs/op
+BenchmarkOTLP/128/passthrough 	   10000	     53938 ns/op	 372.04 MB/s	     608 B/op	       4 allocs/op
+BenchmarkOTLP/128/passthrough 	    9830	     57039 ns/op	 351.81 MB/s	     608 B/op	       4 allocs/op
+BenchmarkOTLP/128/passthrough 	   10000	     54052 ns/op	 371.25 MB/s	     608 B/op	       4 allocs/op
+BenchmarkOTLP/128/materialize 	    4260	    154859 ns/op	 129.58 MB/s	   82272 B/op	    2449 allocs/op
+BenchmarkOTLP/128/materialize 	    3931	    156356 ns/op	 128.34 MB/s	   82272 B/op	    2449 allocs/op
+BenchmarkOTLP/128/materialize 	    3745	    157998 ns/op	 127.01 MB/s	   82272 B/op	    2449 allocs/op
+BenchmarkOTLP/128/materialize 	    3835	    156686 ns/op	 128.07 MB/s	   82272 B/op	    2449 allocs/op
+BenchmarkOTLP/128/materialize 	    3822	    152673 ns/op	 131.44 MB/s	   82272 B/op	    2449 allocs/op
+BenchmarkOTLP/1024/eager      	     630	    910454 ns/op	 175.32 MB/s	  812248 B/op	   19249 allocs/op
+BenchmarkOTLP/1024/eager      	     667	    907927 ns/op	 175.81 MB/s	  812248 B/op	   19249 allocs/op
+BenchmarkOTLP/1024/eager      	     637	    924988 ns/op	 172.57 MB/s	  812248 B/op	   19249 allocs/op
+BenchmarkOTLP/1024/eager      	     686	    899458 ns/op	 177.47 MB/s	  812249 B/op	   19249 allocs/op
+BenchmarkOTLP/1024/eager      	     668	    896582 ns/op	 178.04 MB/s	  812248 B/op	   19249 allocs/op
+BenchmarkOTLP/1024/passthrough         	    1509	    399499 ns/op	 399.56 MB/s	     608 B/op	       4 allocs/op
+BenchmarkOTLP/1024/passthrough         	    1495	    403777 ns/op	 395.33 MB/s	     608 B/op	       4 allocs/op
+BenchmarkOTLP/1024/passthrough         	    1501	    397325 ns/op	 401.75 MB/s	     608 B/op	       4 allocs/op
+BenchmarkOTLP/1024/passthrough         	    1533	    393018 ns/op	 406.15 MB/s	     608 B/op	       4 allocs/op
+BenchmarkOTLP/1024/passthrough         	    1503	    433055 ns/op	 368.60 MB/s	     608 B/op	       4 allocs/op
+BenchmarkOTLP/1024/materialize         	     447	   1243074 ns/op	 128.41 MB/s	  649058 B/op	   19255 allocs/op
+BenchmarkOTLP/1024/materialize         	     478	   1221184 ns/op	 130.71 MB/s	  649058 B/op	   19255 allocs/op
+BenchmarkOTLP/1024/materialize         	     518	   1191568 ns/op	 133.96 MB/s	  649058 B/op	   19255 allocs/op
+BenchmarkOTLP/1024/materialize         	     490	   1209407 ns/op	 131.99 MB/s	  649058 B/op	   19255 allocs/op
+BenchmarkOTLP/1024/materialize         	     520	   1180001 ns/op	 135.27 MB/s	  649058 B/op	   19255 allocs/op
+BenchmarkArrow/1/eager                 	    8872	     58285 ns/op	   54531 B/op	     710 allocs/op
+BenchmarkArrow/1/eager                 	   10000	     60080 ns/op	   54531 B/op	     710 allocs/op
+BenchmarkArrow/1/eager                 	   10000	     61273 ns/op	   54531 B/op	     710 allocs/op
+BenchmarkArrow/1/eager                 	   10357	     57815 ns/op	   54531 B/op	     710 allocs/op
+BenchmarkArrow/1/eager                 	    8772	     60328 ns/op	   54531 B/op	     710 allocs/op
+BenchmarkArrow/1/passthrough           	 1252830	       479.3 ns/op	     632 B/op	       6 allocs/op
+BenchmarkArrow/1/passthrough           	 1255945	       477.1 ns/op	     632 B/op	       6 allocs/op
+BenchmarkArrow/1/passthrough           	 1260538	       477.3 ns/op	     632 B/op	       6 allocs/op
+BenchmarkArrow/1/passthrough           	 1264290	       484.8 ns/op	     632 B/op	       6 allocs/op
+BenchmarkArrow/1/passthrough           	 1215912	       492.6 ns/op	     632 B/op	       6 allocs/op
+BenchmarkArrow/1/materialize           	  102066	      5779 ns/op	    4152 B/op	      98 allocs/op
+BenchmarkArrow/1/materialize           	   99628	      5972 ns/op	    4152 B/op	      98 allocs/op
+BenchmarkArrow/1/materialize           	   99586	      5891 ns/op	    4152 B/op	      98 allocs/op
+BenchmarkArrow/1/materialize           	   95666	      5659 ns/op	    4152 B/op	      98 allocs/op
+BenchmarkArrow/1/materialize           	  109160	      5733 ns/op	    4152 B/op	      98 allocs/op
+BenchmarkArrow/128/eager               	     843	    728814 ns/op	  440941 B/op	   10227 allocs/op
+BenchmarkArrow/128/eager               	     847	    747240 ns/op	  440941 B/op	   10227 allocs/op
+BenchmarkArrow/128/eager               	     835	    726191 ns/op	  440941 B/op	   10227 allocs/op
+BenchmarkArrow/128/eager               	     840	    726999 ns/op	  440941 B/op	   10227 allocs/op
+BenchmarkArrow/128/eager               	     850	    766801 ns/op	  440941 B/op	   10227 allocs/op
+BenchmarkArrow/128/passthrough         	 1188944	       502.9 ns/op	     632 B/op	       6 allocs/op
+BenchmarkArrow/128/passthrough         	 1204699	       498.3 ns/op	     632 B/op	       6 allocs/op
+BenchmarkArrow/128/passthrough         	 1000000	       566.8 ns/op	     632 B/op	       6 allocs/op
+BenchmarkArrow/128/passthrough         	 1000000	       517.8 ns/op	     632 B/op	       6 allocs/op
+BenchmarkArrow/128/passthrough         	  923547	       543.2 ns/op	     632 B/op	       6 allocs/op
+BenchmarkArrow/128/materialize         	    1918	    327735 ns/op	  252048 B/op	    5891 allocs/op
+BenchmarkArrow/128/materialize         	    1617	    336429 ns/op	  252048 B/op	    5891 allocs/op
+BenchmarkArrow/128/materialize         	    1939	    311569 ns/op	  252048 B/op	    5891 allocs/op
+BenchmarkArrow/128/materialize         	    1735	    330621 ns/op	  252048 B/op	    5891 allocs/op
+BenchmarkArrow/128/materialize         	    1917	    301760 ns/op	  252048 B/op	    5891 allocs/op
+BenchmarkArrow/1024/eager              	     100	   5138689 ns/op	 3172166 B/op	   77096 allocs/op
+BenchmarkArrow/1024/eager              	     100	   5269208 ns/op	 3172167 B/op	   77096 allocs/op
+BenchmarkArrow/1024/eager              	     100	   5237912 ns/op	 3172166 B/op	   77096 allocs/op
+BenchmarkArrow/1024/eager              	     100	   5403767 ns/op	 3172169 B/op	   77096 allocs/op
+BenchmarkArrow/1024/eager              	     100	   5228419 ns/op	 3172168 B/op	   77096 allocs/op
+BenchmarkArrow/1024/passthrough        	 1222256	       489.2 ns/op	     632 B/op	       6 allocs/op
+BenchmarkArrow/1024/passthrough        	 1219168	       493.9 ns/op	     632 B/op	       6 allocs/op
+BenchmarkArrow/1024/passthrough        	 1181049	       498.5 ns/op	     632 B/op	       6 allocs/op
+BenchmarkArrow/1024/passthrough        	 1240354	       481.2 ns/op	     632 B/op	       6 allocs/op
+BenchmarkArrow/1024/passthrough        	 1241647	       478.7 ns/op	     632 B/op	       6 allocs/op
+BenchmarkArrow/1024/materialize        	     240	   2567020 ns/op	 1996579 B/op	   46450 allocs/op
+BenchmarkArrow/1024/materialize        	     236	   2522745 ns/op	 1996579 B/op	   46450 allocs/op
+BenchmarkArrow/1024/materialize        	     235	   2506260 ns/op	 1996578 B/op	   46450 allocs/op
+BenchmarkArrow/1024/materialize        	     238	   2502854 ns/op	 1996578 B/op	   46450 allocs/op
+BenchmarkArrow/1024/materialize        	     234	   2591191 ns/op	 1996579 B/op	   46450 allocs/op
+BenchmarkBatch/otlp/protobuf/logs/v1/eager         	     628	    956854 ns/op	  817161 B/op	   19544 allocs/op
+BenchmarkBatch/otlp/protobuf/logs/v1/eager         	     656	    943901 ns/op	  817161 B/op	   19544 allocs/op
+BenchmarkBatch/otlp/protobuf/logs/v1/eager         	     660	    903737 ns/op	  817161 B/op	   19544 allocs/op
+BenchmarkBatch/otlp/protobuf/logs/v1/eager         	     691	    906185 ns/op	  817161 B/op	   19544 allocs/op
+BenchmarkBatch/otlp/protobuf/logs/v1/eager         	     687	    901103 ns/op	  817161 B/op	   19544 allocs/op
+BenchmarkBatch/otlp/protobuf/logs/v1/native        	   23548	     25485 ns/op	  164576 B/op	       6 allocs/op
+BenchmarkBatch/otlp/protobuf/logs/v1/native        	   23754	     25426 ns/op	  164576 B/op	       6 allocs/op
+BenchmarkBatch/otlp/protobuf/logs/v1/native        	   23894	     25227 ns/op	  164576 B/op	       6 allocs/op
+BenchmarkBatch/otlp/protobuf/logs/v1/native        	   23610	     28769 ns/op	  164576 B/op	       6 allocs/op
+BenchmarkBatch/otlp/protobuf/logs/v1/native        	   23361	     29040 ns/op	  164576 B/op	       6 allocs/op
+BenchmarkBatch/otap/arrow/logs/v1/eager            	      99	   5822350 ns/op	 3183563 B/op	   77156 allocs/op
+BenchmarkBatch/otap/arrow/logs/v1/eager            	     105	   5705605 ns/op	 3183416 B/op	   77156 allocs/op
+BenchmarkBatch/otap/arrow/logs/v1/eager            	      96	   5796319 ns/op	 3183635 B/op	   77156 allocs/op
+BenchmarkBatch/otap/arrow/logs/v1/eager            	     100	   5600727 ns/op	 3183535 B/op	   77156 allocs/op
+BenchmarkBatch/otap/arrow/logs/v1/eager            	      94	   5889555 ns/op	 3183697 B/op	   77156 allocs/op
+BenchmarkBatch/otap/arrow/logs/v1/native           	     115	   5228836 ns/op	 3198458 B/op	   76986 allocs/op
+BenchmarkBatch/otap/arrow/logs/v1/native           	     100	   5370268 ns/op	 3198430 B/op	   76986 allocs/op
+BenchmarkBatch/otap/arrow/logs/v1/native           	     100	   5426584 ns/op	 3198409 B/op	   76986 allocs/op
+BenchmarkBatch/otap/arrow/logs/v1/native           	     100	   5434344 ns/op	 3198472 B/op	   76986 allocs/op
+BenchmarkBatch/otap/arrow/logs/v1/native           	     100	   5384221 ns/op	 3198435 B/op	   76986 allocs/op
 PASS
-ok  	go.opentelemetry.io/collector/internal/pdataprototype/logs	65.209s
+ok  	go.opentelemetry.io/collector/pdata/xpdata/plogpayload/otap	65.720s

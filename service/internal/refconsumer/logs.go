@@ -8,6 +8,7 @@ import (
 
 	"go.opentelemetry.io/collector/consumer"
 	"go.opentelemetry.io/collector/pdata/plog"
+	"go.opentelemetry.io/collector/pdata/xpdata/payload"
 	"go.opentelemetry.io/collector/pdata/xpdata/pref"
 )
 
@@ -19,6 +20,10 @@ func NewLogs(cons consumer.Logs) consumer.Logs {
 
 type refLogs struct {
 	consumer consumer.Logs
+}
+
+func (c refLogs) ConsumeLogsPayload(ctx context.Context, p *payload.Payload) error {
+	return consumer.ConsumeLogsPayload(ctx, c.consumer, p)
 }
 
 // ConsumeLogs measures telemetry before calling ConsumeLogs because the data may be mutated downstream

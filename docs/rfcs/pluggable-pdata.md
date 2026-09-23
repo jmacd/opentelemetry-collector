@@ -1,426 +1,383 @@
 # Pluggable pipeline data for Collector v2
 
-**Status:** Draft for discussion, with an isolated logs-only prototype. This is
-not an accepted RFC, a production feature, or a proposal to change OTLP.
+**Status:** Draft with an integrated, opt-in logs prototype. Not an accepted RFC
+or a stable API. Enable the prototype with `--feature-gates=service.PluggableLogs`.
 
-## Summary and decision
+## Proposal
 
-Introduce a representation-neutral pipeline payload alongside the existing
-object APIs. Keep `plog.Logs`, `pmetric.Metrics`, and related packages as the
-mutable OTLP object model. Move the obligation to construct those objects from
-every receiver to the first component that needs them.
+Keep `plog.Logs` as the OTLP object API, and add a representation-neutral payload
+and read-only views beside it. Pipeline components should request objects only
+when they actually need mutable object access. A payload can carry protobuf
+bytes, real OTAP Arrow records, or another registered representation.
 
-A payload can own OTLP protobuf bytes, OTAP Arrow record groups, or another
-registered representation. Routing by request metadata, whole-request retry,
-queueing, and supported native batching operate without constructing pdata
-objects. A codec registry materializes another representation on demand.
-Generated protobuf implementations and Arrow libraries belong behind adapters,
-not in representation-neutral components.
+This branch now implements the necessary operations rather than treating them as
+prerequisites for another prototype:
 
-Changing the pipeline-wide consumer contract is a major-version project. The
-accompanying [prototype](../../internal/pdataprototype/README.md) deliberately
-does **not** change stable APIs, component factories, service graphs, transport
-implementations, or the default Collector binary. Its module is excluded from
-release sets and is not a Builder component.
+- The real OTLP receiver admits protobuf logs from HTTP and gRPC without building
+  `plog.Logs`.
+- The actual service graph preserves the native interface through capabilities,
+  fan-out, telemetry, reference-management, and connector-router wrappers.
+- The real debug exporter reads resource, scope, attribute, and log fields through
+  native views; it does not first materialize objects.
+- The prototype distribution's `view_route` connector partitions individual logs
+  using resource, scope, or log attributes, with native views and native slices.
+- The real exporterhelper queue, batcher, retry sender, and persistent queue
+  accept native requests. Item and byte limits, partial retry subsets, context
+  persistence, and ownership are implemented.
+- OTLP HTTP/protobuf and gRPC exporters send retained wire bytes, or transcode
+  Arrow through views, without going through the object model.
+- Arrow merge physically coalesces main and related records, reconciles input
+  schemas/dictionaries, and rebases IDs. Arrow split produces independently
+  decodable records, not a hidden selection into the unsplit input.
 
-Approval of the architectural direction would authorize staged experimental
-work, not stabilize the prototype API, promise a release date, or assert that
-native Go views and full Collector/DFE parity already exist.
+Existing behavior is the default: the feature gate is alpha and disabled.
+Traces, metrics, and profiles are unchanged. Legacy logs components still work
+through explicit object adapters. The prototype distribution is a real
+`otelcol.Collector`, using the repository's component factories and service graph,
+not an imitation pipeline.
 
-## Motivation and evidence from existing implementations
+See [the runnable example](../../internal/pdataprototype/README.md).
 
-Today, `consumer.Logs.ConsumeLogs` takes `plog.Logs`. The OTLP receiver therefore
-receives already-decoded objects, and `plogotlp.ExportRequest` wraps those same
-objects. The exporterhelper request abstraction comes too late to avoid the
-receiver-side decode.
+## Package and dependency boundary
 
-Exporterhelper already provides most of the relevant *operations*: an opaque
-request, item/byte sizing, merge/split, partial-error handling, reference
-counting, and persistence encoding. It is not literally an unconstrained `any`:
-its current `Request` interface requires `ItemsCount`, `BytesSize`, and
-`MergeSplit`. Its custom logs exporter still accepts a converter from
-`plog.Logs`. Elevating the operations and payload boundary is preferable to
-creating a second independent queue/retry framework.
+| Package | Responsibility |
+| --- | --- |
+| `pdata/xpdata/payload` | Neutral ownership, codec registry, logs views, native merge/split, attribute partitioning, partial retry ranges |
+| `pdata/xpdata/plogpayload` | Object and OTLP protobuf adapters, wire validation/traversal, direct view-to-protobuf marshaling |
+| `pdata/xpdata/plogpayload/otap` | Optional real Arrow records, native column views, physical coalescing and ID-correct slicing |
+| `consumer` | Native dispatch plus the legacy `plog.Logs` compatibility boundary |
+| `exporter/exporterhelper` | Adapter into the existing queue/retry/persistence machinery |
+| `internal/pdataprototype` | Runnable distribution, view-routing connector, whole-Collector tests and benchmarks |
 
-The [Contrib Arrow receiver][contrib-receiver] calls `LogsFrom` to construct
-`plog.Logs`, then calls `ConsumeLogs`. The [Arrow exporter][contrib-exporter]
-receives `plog.Logs` and constructs Arrow data again. A pipeline with no
-object-level processing still pays for that round trip.
+The neutral package imports only the standard library. The protobuf adapter
+does not import Arrow. Object and Arrow libraries are implementation details of
+their adapters; a neutral algorithm needs neither.
 
-The [DFE payload][dfe-payload] owns either OTLP bytes or OTAP records and caches
-measurements. Its request context is separate from the payload. Its
-[pdata views][dfe-views] support accessing those representations without a
-mandatory object-model conversion. These are architectural precedents, not
-evidence that the same performance automatically transfers to Go.
+Current multi-signal component packages still contain their legacy object APIs.
+The prototype demonstrates the package boundary needed for a future
+native-only component interface; it does not claim that a binary which supports
+legacy components and other signals contains no generated messages.
 
-Relevant explorations include arbitrary byte codecs in
-[open-telemetry/otel-arrow#3452][arbitrary-bytes], alternative Arrow formats in
-[open-telemetry/otel-arrow#3875][alternative-arrow], and profile version
-negotiation in
-[open-telemetry/opentelemetry-proto#857][profile-version].
+There is no global codec registration. Registries copy their definitions at
+construction and are immutable thereafter. Formats identify signal, representation,
+and version. Built-ins are `pdata/logs`, `otlp/protobuf/logs/v1`, and
+`otap/arrow/logs/v1`. Additional codecs can supply native views, merge, slice,
+size, canonical conversion, and direct representation-to-representation conversion.
 
-## Scope
+## Counts before and after decoding
 
-The v2 direction covers all signals and registered byte/columnar formats.
-Implementation here covers logs, with three representations:
-
-| Representation | Contents | Role |
-| --- | --- | --- |
-| `pdata/logs` | Read-only `plog.Logs` | Canonical conversion hub and legacy adapter |
-| `otlp/protobuf/logs/v1` | Uncompressed `ExportLogsServiceRequest` bytes | Byte-preserving forwarding and concatenation |
-| `otap/arrow/logs/v1` | Real main/related Arrow records, grouped by original batch | Columnar forwarding and grouped batching |
-
-The format strings are prototype identifiers, not standardized media types.
-Production identifiers must distinguish signal, encoding, and schema/protocol
-version. Compression and transport framing are separate concerns.
-
-Out of scope for this iteration: a production receiver/exporter, service graph
-wiring, transport benchmarks, generated views, hard-limit splitting, native
-Arrow coalescing, a durable queue envelope, Arrow persistence, a syslog codec,
-and a WASM/Quiver integration. The full DFE comparison is a subsequent milestone.
-
-## Proposed architecture
-
-### Payload and codecs
-
-The prototype's `payload` package has only standard-library dependencies. Its
-representation interface exposes format, item count, and lifetime management;
-the concrete bytes, objects, or Arrow records remain in the adapter package.
-This is analogous to exporterhelper's custom requests without importing an
-exporter helper into receivers and processors.
-
-A distribution constructs an immutable registry before serving traffic. Each
-noncanonical codec registers conversion to/from the canonical object format,
-plus optional native merge. Registration rejects duplicate and incomplete
-codecs. Registration is explicit rather than via global `init` side effects.
-No automatic package discovery or arbitrary plugin loading is proposed.
-
-`Payload.As(format)` returns the original representation directly when possible.
-Otherwise it lazily converts through the canonical format and caches successful
-results and deterministic errors for that payload's lifetime. Conversions are
-serialized per payload; a codec may be invoked concurrently for different
-payloads. The prototype Arrow encoder serializes its reusable builder.
-
-This small conversion hub is intentionally not a graph search framework.
-Direct OTLP-to-OTAP conversion through native views can be added as a fast path
-without making object conversion mandatory for ordinary forwarding. Codec
-version/fidelity checks must reject conversions that cannot represent the
-source; format compatibility must not be inferred from “both are logs.”
-For example, the prototype rejects encoding empty resource/scope groups into
-Arrow rather than silently losing their metadata in a row-based representation.
-
-Representation-neutral consumers should eventually receive a signal-typed
-payload with request context:
+Predecoded counting is explicitly fallible:
 
 ```go
-// Illustrative v2 contract, not a stable API added by this prototype.
-ConsumeLogs(context.Context, *LogsPayload) error
+count, err := p.ItemsCount()
+if err != nil {
+    return err
+}
 ```
 
-The prototype specializes format identifiers to logs rather than choosing a
-final Go generics design for every signal. It demonstrates the dependency
-boundary and operations, not the final names.
+Construction does not force a count or a decode. The protobuf implementation
+validates/counts wire fields lazily, without allocating message objects. Arrow
+uses main-record row counts. The result is cached.
 
-### Ownership, immutability, and mutation
+An arbitrary codec may be unable to supply a count until it materializes
+objects. A failed predecode count does not prevent that materialization:
+successful object decoding replaces the unknown/error count with the known
+count. The object API remains infallible:
 
-A newly constructed payload has one owner. Native data ownership transfers only
-on successful construction. Borrowed transport buffers must be copied or retained
-before transfer; passing a buffer that the transport will reuse is invalid.
+```go
+logs, err := plogpayload.ReadOnlyLogs(p)
+if err != nil {
+    return err
+}
+count := logs.LogRecordCount()
+```
 
-An asynchronous queue or fan-out branch retains a payload and releases exactly
-one reference after its last use. Final release releases all cached
-representations. Arrow references retain the actual buffers and dictionaries,
-not just Go pointers. The tests check that merged records outlive both their
-source payloads and the encoder.
+Exporterhelper's existing `Request.ItemsCount() int` and `BytesSize() int` need
+not return placeholder values. `NewPayloadRequest` resolves fallible native
+measurements **before queue admission**, then stores known integer measurements.
+Errors are returned permanently before any request is enqueued.
 
-Representations returned by `As` are borrowed and immutable. Read-only
-`plog.Logs` enforce this with `MarkReadOnly`; Go byte slices and Arrow message
-wrappers rely on the documented borrowing contract. A public API may choose
-less permissive accessors than the prototype.
+The byte sizer measures logical OTLP wire bytes, matching the existing queue's
+signal-oriented sizing, not process RSS. Arrow measures its direct view-to-OTLP
+encoding. Retained memory and dictionary sharing are different quantities;
+this byte sizer must not be advertised as exact heap accounting.
 
-A mutator obtains an independent writable object copy and constructs a new
-payload after mutation. It must **not** mutate a cached object and then reuse the
-old bytes or records. The prototype's `MutableLogs` models this conservative
-boundary. Unique-owner mutation/encoding-cache invalidation is a possible later
-optimization, not a prerequisite.
+## Native views
 
-Retain/borrow-after-release returns an error. Double release is a programming
-error and panics. Invalid wire data returns errors, not lifetime panics.
+`LogsView.Resources` visits resource groups; each group exposes scope groups,
+and each scope exposes log records. Scalar fields are read from native storage.
+Attribute values and bodies are borrowed `Value` objects with a fallible
+`Read()` method. Attribute lookup can read a selected value without decoding
+unrelated bodies into an object tree.
 
-### Context, routing, counts, and sizing
+The protobuf view walks wire fields and borrows length-delimited data. It handles
+resources, scopes, all current log fields, nested values, and resource entity
+references. The Arrow view reads columns directly, indexes related attributes by
+their parent IDs, and interprets dictionaries and delta IDs. Schema/column
+lookups are amortized across rows rather than repeated for every scalar.
+Complex Arrow values use their existing CBOR representation; accessing one
+decodes that value, not an enclosing `plog.Logs`.
 
-Context remains independent of the representation: cancellation, request
-metadata, authorization, and retry state do not belong in signal data.
-Conversions must not change it. Merge is legal only after the existing batching
-partitioner has established compatible routing/authentication/metadata context.
-The prototype has no context partitioner and does not model cross-request
-context merging.
+The view interfaces themselves are representation-neutral. There is no
+`ReadOnlyLogs` call concealed inside a protobuf or Arrow view. Tests install
+codecs whose object decoder returns an error and assert that debug rendering,
+attribute routing, slicing, merging, and wire transcoding still succeed.
 
-OTLP item counting scans the request/resource/scope message envelopes, without
-decoding log records, attribute maps, or bodies. It is O(number of envelopes),
-not O(1). Invalid envelope lengths/wire types fail admission. Arrow counts come
-from main-record row counts. Counts are checked after conversion and merge.
+The actual debug exporter uses these views when the gate is enabled. Basic
+verbosity retains its count summary. Normal/detailed native output uses
+resource/scope/log JSON lines, with explicit field names and hexadecimal IDs.
+This experimental output format differs from the legacy text format. Nested
+values, empty groups, nonfinite doubles, and entity references are handled.
+The logger receives rendered output only after traversal succeeds, so a decode
+failure cannot masquerade as a successful debug export.
 
-This scan does **not** validate fields within every LogRecord or every nested
-attribute. A structurally countable request can fail materialization later;
-there is an explicit test for this. A production receiver must specify its
-validation contract: strict validation at admission, or clearly documented
-deferred validation with permanent-error propagation. Avoiding object
-allocation does not justify silently changing error/acknowledgment semantics.
+The interfaces and logs traversal are handwritten in this prototype. The
+production implementation should derive per-signal field definitions and views
+from `pdatagen`'s model, rather than independently maintaining another field
+catalog for every signal.
 
-Representation size is not one universal number. Production APIs need separate
-wire size, retained-memory size, item count, and request count. Arrow retained
-buffers, dictionary sharing, and slices make an OTLP `BytesSize` estimate a poor
-memory limit. Converted caches increase live memory; the prototype retains all
-conversions until final release and does not implement a memory limiter.
+## Native routing, batching, and splitting
 
-### Batching and exporterhelper
+The runnable `view_route` connector uses `Attributes.Lookup` and
+`Payload.Partition`. Both matching and nonmatching records preserve their
+representation. A resource/log attribute route is not an implicit conversion
+boundary. The connector routes to real downstream Collector pipelines.
 
-OTLP `ExportLogsServiceRequest` currently has repeated `resource_logs` at field
-1. Concatenating **uncompressed protobuf message bodies** merges these lists
-without decoding. This does not concatenate gRPC frames, compressed bodies, or
-JSON. Unknown wire fields survive the pass-through path and native byte merge;
-object conversion has the current decoder's unknown-field/migration behavior.
-Future protocol versions with different merge semantics require different codecs.
+### OTLP
 
-Arrow batching retains a list of independent main/related record groups. It
-does not concatenate columns whose resource/attribute IDs happen to have the
-same numeric values. Each group is decoded with its own related-data stores.
-This avoids ID collisions and retains dictionaries without rewriting columns.
-It is a logical batch, **not** proof of a larger single outbound Arrow batch or
-fewer network requests. Physical coalescing must rebase IDs and reconcile schemas
-and dictionaries.
+The protobuf merger concatenates uncompressed `ExportLogsServiceRequest` bodies:
+`resource_logs` is repeated field 1. It does not concatenate gRPC frames,
+compressed bodies, or JSON.
 
-The prototype supports same-format native merge only. Mixed formats, registries,
-and unsupported operations return errors. It preserves caller-owned inputs.
-Its eager batching baseline moves decoded resource logs into the output rather
-than charging the baseline an unnecessary deep copy.
+Slicing rewrites request/resource/scope envelopes while copying selected
+LogRecord wire fields untouched. Resource and scope metadata are preserved,
+including empty groups and unknown fields. Empty groups are assigned once,
+not duplicated across adjacent splits. Counts are derived from validated input
+counts and selected ranges; already-validated records are not revalidated after
+every merge.
 
-Production integration should extract or elevate exporterhelper's neutral
-request operations and adapt the existing queue/retry/timeout/telemetry machinery.
-It should not fork that machinery. Important differences to resolve:
+### Arrow
 
-- `ItemsCount()` cannot return decode errors: establish a valid count before
-  admission, or revise that contract.
-- Current `MergeSplit` has hard-size and output-order requirements. Whole-group
-  batching alone cannot satisfy arbitrary item/byte splits. Implement native
-  splitting, explicitly opt into object fallback, or reject incompatible
-  configuration at startup; never quietly exceed the configured limit.
-- Partial retry errors must identify the retained subset or carry a new
-  representation-neutral payload. Retrying the complete input when only a
-  subset is eligible can duplicate accepted data.
-- Native no-op routing can use request context. Routing on resource/log
-  attributes still requires a native view or object materialization.
+Same-payload forwarding retains the actual Arrow buffers and dictionaries.
+Merging independent inputs physically writes canonical Arrow columns, combines
+related attribute records, and rebases resource, scope, log, and attribute-parent
+IDs. This is no longer just a list of independent input groups.
 
-### Persistence and storage extensions
+The prototype canonical output schema is nondictionary-encoded. Inputs may use
+different adaptive schemas/dictionaries. One output group is produced when it
+fits; larger results use additional groups at the OTAP uint16 identifier limit.
+Unknown columns that the coalescer cannot preserve produce an explicit error.
 
-The storage extension already stores `[]byte`; it is not the layer that chooses
-how pdata is serialized. The current exporterhelper logs encoding uses
-`pdata/xpdata/request` to encode data together with selected request context.
-That encoding and its restore path need an adapter; a storage backend need not
-import generated OTLP messages.
+Splitting borrows/slices ordinary columns and rebuilds the initial delta IDs for
+each main-record slice. Related data remains referenced by its original absolute
+IDs. Every output slice can be independently decoded by the existing OTel-Arrow
+consumer. Keeping unused related attributes in a slice trades memory efficiency
+for simpler ownership; views and logical wire sizing expose only referenced
+attributes.
 
-A future durable envelope needs an explicit format/version, payload length,
-supported context fields, and integrity/framing validation. Restore must preserve
-byte ownership and leave payload decoding lazy. Unknown codecs/versions and
-corrupt entries must fail visibly; they must not be counted as delivered.
-Old queue entries need an explicit upgrade/drain or compatibility strategy.
-Process-local cancellation and authentication objects must not be blindly
-serialized and replayed as current credentials.
+### Limits and error behavior
 
-The prototype's `PersistentBytes` only supplies borrowed OTLP bytes. Its tests
-copy those bytes before restoring them and verify byte identity. It is neither a
-queue envelope nor a crash-recovery implementation. It explicitly rejects Arrow
-source payloads, even when a network conversion to OTLP has been cached.
+`MergeSplit` handles both item and byte limits. Byte-limited splitting chooses
+native record ranges based on their exact logical wire size. Returned requests
+meet the bound, and the smallest remainder is last as exporterhelper requires.
+A single record or empty metadata envelope larger than the byte limit returns
+an error. Inputs remain unchanged and failures return no partially mutated
+output. There is no “silently exceed the limit” or object-decoding fallback.
 
-Arrow-to-bytes persistence is not part of this work. A future synchronous WASM
-adapter to DFE's [Quiver durable buffer][quiver] is a separate investigation with
-its own memory, ownership, failure, and acknowledgment contract.
+Registries may merge compatible formats from different receivers; codec methods
+validate concrete representations. Mixed-format logs select protobuf as their
+common representation: Arrow is transcoded through native views and already
+materialized objects are encoded normally. Both input orders are tested with
+object decoders forbidden. Homogeneous Arrow batches remain Arrow and physically
+coalesce; homogeneous protobuf batches retain their wire representation.
 
-### Debug exporter, views, and code generation
+These implementations prioritize correctness over optimal selection complexity.
+Attribute partitioning currently uses contiguous native slices; highly
+fragmented selections can be optimized without changing the view or ownership
+contracts.
 
-Basic counts can use the neutral payload metadata. Detailed debug output needs
-signal fields. Initially, an adapter can materialize `plog.Logs` on demand and
-reuse the existing debug marshalers. The prototype demonstrates this boundary
-with `WriteDebug`, returning decode and writer errors; it does not modify the
-production debug exporter or promise identical debug output formatting.
+## Ownership, mutation, queues, and retry
 
-The longer-term design is a generated read-only views API implemented for
-objects, OTLP wire data, and OTAP records. Native views could let detailed debug
-and read-only processors avoid complete object materialization. The Rust DFE
-views are prior art, not a Go implementation included here.
+Payloads own their original representation and lazily cached conversions.
+Consumers borrow a payload for the call and retain a reference for asynchronous
+use. Final release releases all cached representations. Returned views and
+values are borrowed for that lifetime.
 
-Use `pdatagen`'s existing model as the source for object adapters, signal-specific
-view contracts, field traversal, and potentially wire counting. Generated
-protobuf/object implementations stay in object/codec packages. Neutral queues,
-metadata routers, and service wiring must not depend on them. The prototype's
-small logs-envelope scanner is handwritten; copying it separately for every
-signal is not the proposed production maintenance strategy.
+Canonical objects are marked read-only. Mutating legacy consumers receive an
+independent writable copy; they cannot mutate cached objects and then forward
+stale bytes. The native-to-legacy adapter owns the copy's lifetime.
 
-## Transport and Contrib migration
+Object references use `xpdata/pref`, not merely Go pointer reachability.
+Otherwise the existing pdata pooling feature could reset an object still held
+by a native queue. Legacy-to-native entry points retain their own pdata
+reference, and native-owned canonical objects are marked pipeline-owned.
+A test enables `pdata.useProtoPooling`, releases the original producer reference,
+and verifies that the asynchronous native consumer still receives the data.
 
-OTLP gRPC currently decodes into `plogotlp.ExportRequest` before the receiver
-handler runs. Changing only exporterhelper cannot eliminate that decode. An
-experimental transport path must capture the uncompressed request bytes at the
-gRPC codec boundary, or before HTTP's protobuf unmarshaler, while retaining size
-limits, authorization, status mapping, partial success, and reference ownership.
-HTTP JSON requires a separate codec and merge strategy.
+The existing exporterhelper asynchronous queue retains/releases native payloads.
+Native merge/split results have separate ownership. The existing batcher releases
+them after replacement or final consumption; the original input's queue
+reference remains managed by the queue. The same paths cover timer flush,
+shutdown flush, and forwarding to the existing retry sender.
 
-For Contrib Arrow, use the lower-level consumer operation that produces real
-records, rather than `LogsFrom`. Preserve records across the pipeline and
-serialize them into the outbound stream without a pdata round trip. Arrow IPC
-dictionary/schema state is stream-specific: forwarding serialized IPC fragments
-from one stream into another is not generally valid. Native forwarding still
-does IPC work at both transport boundaries.
+`payload.PartialError` identifies ordered, nonoverlapping retry ranges. The
+request adapter validates and selects only those records, without objects.
+The retry sender owns and releases replacement requests, propagating selection
+errors rather than retrying an incorrect whole request. Legacy
+`consumererror.Logs` subsets are also adapted. Existing non-native requests keep
+their existing error-handler behavior.
 
-During migration, adapters surround legacy consumers/processors. Only
-object-dependent components materialize. Mutating branches must obtain isolated
-copies; fan-out to neutral branches should retain the original format.
-Capability declarations should identify native formats, read-only views,
-mutation, merge/split, and durable encoding support. Pipeline construction should
-reject unsupported combinations rather than discovering them after buffering.
+Request context remains separate from signal representation. Existing batch
+partitioning and context merging continue to apply; users must configure
+metadata partitions when different tenants/authentication contexts must not mix.
 
-Classify and migrate surfaces separately:
+## Persistence
 
-| Surface | Neutral work | Work that still needs signal access |
-| --- | --- | --- |
-| Receivers/exporters | Byte/record ownership and transport | Validation, conversion, partial success |
-| exporterhelper | Queue, retry, timeout, request-context partitioning | Native codecs, sizing, split, partial retry |
-| Storage extension | Store/retrieve envelope bytes | Queue-level envelope codec/upgrade logic |
-| Service/fan-out/connectors | Context and retained payload references | Mutating-branch copies and legacy adapters |
-| Batch processors | Supported native merge | Splits and mixed-format policy |
-| Debug exporter/processors | Basic metadata | Native views or lazy objects |
-| Memory limiter/telemetry | Request and item accounting | Accurate retained-buffer/cache accounting |
+The storage extension already stores bytes. The changed layer is the
+exporterhelper queue encoding, not the storage backend.
 
-The final package/module split should ensure that importing a neutral component
-does not pull in `pdata/internal` or any generated OTLP implementation. Keeping
-`plog.Logs` unchanged avoids forcing the much larger Contrib object-processing
-ecosystem to rewrite every field accessor.
+The native logs envelope contains a versioned magic header, a bounded context
+length, an integrity checksum, the existing selected request-context encoding,
+and the original OTLP bytes. Restoring it copies storage-owned bytes and creates
+a lazy payload. Counting/validation failures, corrupt envelopes, and unknown
+versions return errors. Cancellation and authentication objects are not serialized
+as replayable credentials; context fields follow the existing request codec.
 
-## Prototype and measurements
+Existing object/context and raw OTLP queue entries can be migrated on restore.
+Only that old-format migration needs the old object decoder.
 
-The prototype uses the local Collector pdata implementation at base commit
-`5626c6b5127d5ac8a45d55913a6bb1f07739f0b9`, OTel-Arrow Go `v0.56.0`, and Arrow Go
-`v18.6.0`. It uses actual logs builders and main/related Arrow records, not a
-stand-in Arrow struct. The encoder uses the existing exported builder APIs;
-production should establish a supported records-only producer API upstream.
+Tests exercise the **real persistent queue** across shutdown and restart using
+the repository's storage-extension fixture, then batch/split the restored native
+request and check its context and contents. This is stronger than only testing
+a byte snapshot helper; it is not a filesystem-fsync benchmark.
 
-On this run: Linux/amd64, Intel Core Ultra 7 165H, Go 1.26.7, `-cpu=1`,
-500 ms per sample, five samples per case. Results below are rounded medians, not confidence
-intervals. CPU affinity/frequency and other host activity were not controlled.
-[Raw output](../../internal/pdataprototype/benchmark-results.txt) and
-[reproduction commands](../../internal/pdataprototype/README.md) are included.
+As specified in the assignment, OTAP-to-bytes persistence is not implemented.
+Attempting to persist an Arrow source fails explicitly, even if a network
+transcoding result is cached. A [Quiver/WASM][quiver] durable-buffer integration
+is a separate storage design.
 
-The generated fixture includes resource/scope metadata, attributes with nested
-values, string/map/bytes/integer bodies, timestamps, IDs, severity, flags, event
-names, and dropped-attribute counts. It is a synthetic workload, not a claim
-about a production distribution of log sizes.
+## Collector integration and compatibility
 
-### Request paths
+The OTLP gRPC receiver registers a native logs service descriptor under the same
+OTLP method name when enabled. Its request implements the existing pdata gRPC
+wire codec contract and copies pooled incoming buffers before retention.
+Existing server options, interceptors, limits, and method names remain in use.
+The HTTP receiver creates the same payload before protobuf unmarshaling.
 
-| Format / logs | Eager ns/op | Pass-through ns/op | Materialize ns/op | Eager B/op | Pass-through B/op | Eager / pass allocations |
-| --- | ---: | ---: | ---: | ---: | ---: | ---: |
-| OTLP / 1 | 1,677 | 390 | 2,087 | 1,448 | 560 | 34 / 4 |
-| OTLP / 128 | 121,457 | 1,277 | 108,223 | 102,104 | 560 | 2,443 / 4 |
-| OTLP / 1024 | 988,885 | 8,298 | 907,920 | 812,248 | 560 | 19,249 / 4 |
-| Arrow / 1 | 62,132 | 516 | 6,243 | 54,531 | 616 | 710 / 6 |
-| Arrow / 128 | 783,592 | 532 | 355,880 | 440,941 | 616 | 10,227 / 6 |
-| Arrow / 1024 | 6,280,571 | 561 | 2,877,384 | 3,172,168 | 616 | 77,096 / 6 |
+Native admission validates known protobuf wire types, nested values, UTF-8,
+identifier lengths, and nesting bounds without constructing pdata. Invalid
+requests receive `InvalidArgument`/HTTP 400. Unknown protobuf fields remain
+opaque and are preserved by forwarding and native splitting.
 
-OTLP eager decodes and re-encodes a message. Pass-through includes envelope
-scanning, a new payload, retain/release handoff accounting, and retrieval of the
-original bytes. Both borrow an immutable prebuilt input fixture; neither pays
-for transport ownership copies. Materialize also constructs objects but still
-forwards the original representation, modeling read-only processing.
+The HTTP/protobuf exporter uses the original bytes when possible. The gRPC
+exporter invokes the existing OTLP method with a wire message, retaining the
+existing timeout/retry/transport setup and response/partial-success handling.
+HTTP JSON retains its existing object-codec boundary; this branch's byte
+pass-through representation is OTLP protobuf.
 
-Arrow eager converts records to objects and reconstructs records using a reused
-encoder. Both paths start after IPC decoding and acquire equivalent record
-ownership from a retained fixture. Pass-through creates a payload and retrieves
-the same records. It does not traverse every row or serialize IPC. Materialize
-decodes objects but forwards the unchanged records.
+Consumers may implement `ConsumeLogsPayload` beside `ConsumeLogs`. Compatible
+service wrappers preserve this method. A legacy-only component is an explicit
+adapter boundary, not a reason to make all earlier components decode.
+The prototype router demonstrates actual pipeline integration without changing
+Contrib repositories.
 
-Avoiding the codec round trip greatly reduces these costs. This is **not** an
-equivalent multiplier for Collector throughput: network, IPC, compression, auth,
-scheduling, queue contention, acknowledgments, and storage are absent. The small
-OTLP materialization case is slower than eager processing, exposing the payload
-machinery's overhead rather than implying every pipeline improves.
+Contrib's [Arrow receiver][contrib-receiver] currently calls `LogsFrom`, and its
+[exporter][contrib-exporter] accepts `plog.Logs`. Their native entry/exit points
+should pass the decoded IPC records to/from the new payload API. Stream-specific
+IPC schema/dictionary state still belongs at transport boundaries: arbitrarily
+relaying serialized IPC fragments between unrelated streams is not valid.
 
-### Batching eight 128-log inputs
+The original v2 motivation remains: arbitrary byte codecs
+([open-telemetry/otel-arrow#3452][arbitrary-bytes]), other Arrow representations
+([open-telemetry/otel-arrow#3875][alternative-arrow]), and negotiated profile
+versions ([open-telemetry/opentelemetry-proto#857][profile-version]).
+DFE's [dual-format payload][dfe-payload] and [native views][dfe-views] are
+architectural precedents, not substitutes for a Go implementation.
 
-| Format | Eager ns/op | Native ns/op | Eager B/op | Native B/op | Eager / native allocations |
+## Measurements
+
+Linux/amd64, Intel Core Ultra 7 165H, Go 1.26.7, `-cpu=1`, 500 ms per sample,
+five samples per case. Numbers below are rounded medians; CPU affinity/frequency
+and unrelated host activity were not controlled. OTel-Arrow Go is pinned at
+`v0.56.0`, Arrow Go at `v18.6.0`, with local Collector modules.
+
+The first prototype's much lower OTLP scan cost and cheap grouped-Arrow batch
+numbers no longer describe this implementation. These measurements include
+known-field wire validation and physical Arrow coalescing.
+
+### Real Collector relay
+
+128 logs/request, two HTTP hops, the actual service graph and exporterhelper
+queue, `wait_for_result: true`, no compression or batching. Both modes use the
+same distribution, fixture, endpoints, and settings; only the feature gate changes.
+
+| Mode | ns/request | B/request allocated | allocations/request |
+| --- | ---: | ---: | ---: |
+| Existing eager Collector | 205,898 | 126,201 | 1,594 |
+| Native payload Collector | 183,598 | 67,863 | 302 |
+
+This run shows about 11% lower request time, 46% fewer allocated bytes, and 81%
+fewer allocations. It is a sequential loopback relay, not a saturation or
+production throughput result. The backend drains bytes; separate correctness
+tests decode and validate deliveries. Latency varied materially between runs on
+this shared, unpinned host; the allocation reduction is more repeatable.
+
+### Local representation operations
+
+| Operation | Eager ns/op | Native ns/op | Eager B/op | Native B/op | Eager/native allocations |
 | --- | ---: | ---: | ---: | ---: | ---: |
-| OTLP | 1,103,527 | 31,192 | 817,129 | 164,528 | 19,544 / 6 |
-| Arrow | 5,975,465 | 1,338 | 3,183,564 | 1,048 | 77,156 / 9 |
+| OTLP forwarding, 128 logs | 118,630 | 54,052 | 102,104 | 608 | 2,443 / 4 |
+| OTLP forwarding, 1024 logs | 907,927 | 399,499 | 812,248 | 608 | 19,249 / 4 |
+| Arrow forwarding, 128 logs | 728,814 | 518 | 440,941 | 632 | 10,227 / 6 |
+| Arrow forwarding, 1024 logs | 5,237,912 | 489 | 3,172,167 | 632 | 77,096 / 6 |
+| OTLP merge, 8 x 128 logs | 906,185 | 25,485 | 817,161 | 164,576 | 19,544 / 6 |
+| Arrow coalescing, 8 x 128 logs | 5,796,319 | 5,384,221 | 3,183,563 | 3,198,435 | 77,156 / 76,986 |
 
-Inputs are already admitted; native batching does not repeat the ingress count
-scan. Eager batching decodes all eight inputs, moves their resource logs, and
-encodes the result. OTLP native merge copies serialized bytes into one output
-message. Arrow native merge retains eight independent groups, whereas eager
-produces one reconstructed group. These are logically equivalent log contents,
-but **different physical/network batching outcomes**. This benchmark does not
-establish the cost of Arrow ID/schema/dictionary coalescing.
+Arrow forwarding starts after IPC decoding and ends before IPC encoding. Its
+large microbenchmark ratio must not be used as a Collector throughput multiplier.
+Arrow coalescing is real work: the native implementation is modestly faster in
+this run, with approximately the same allocation volume, not allocation-free.
+Its canonical nondictionary output also differs physically from the adaptive
+producer baseline; network/compression costs are not compared here.
 
-Correctness checks cover populated-field round trips, unknown OTLP fields on
-byte-preserving paths, native batch content/counts, independent Arrow ID
-namespaces, copy-before-mutation, conversion caching/errors, malformed envelopes,
-deferred malformed-record errors, unsupported persistence, writer errors,
-empty-group fidelity rejection, concurrent conversion, and Arrow buffer release.
-The neutral package's dependency list contains only itself and standard-library
-packages. Timing is not asserted in tests.
+Read-only materialization cases are included in the raw output. They demonstrate
+that requesting objects still costs time and memory: OTLP materialization can be
+slower than eager processing after accounting for validation and payload overhead.
+This design does not claim every pipeline becomes faster.
 
-## End-to-end acceptance: subsequent work
+[Codec results](../../internal/pdataprototype/benchmark-results.txt),
+[Collector results](../../internal/pdataprototype/collector-benchmark-results.txt),
+and [reproduction commands](../../internal/pdataprototype/README.md) are included.
 
-The assignment's original full-system acceptance criterion is **not yet met**.
-This iteration establishes the architecture and local codec savings, following
-the agreed isolated-prototype scope.
+## Evidence and next architectural decisions
 
-Use DFE's [pipeline performance harness][perf-harness], especially the
-`comparison_dashboard` Collector and engine OTLP/OTAP pass-through templates, for
-the integrated milestone. Pin both revisions, Collector distributions, datasets,
-and container/build settings. Compare unmodified Collector, the experimental
-Collector, and DFE, not these Go microbenchmarks against published Rust numbers.
+The integration test starts a real Collector with HTTP and gRPC ingress, the
+native attribute-routing connector, fan-out to debug and both OTLP exporters,
+and item-limited queues. It checks delivered counts, hard limits, actual native
+debug output, and unknown-field preservation across the complete path. Preserving
+an unknown wire field is an independent check that forwarding did not secretly
+decode/re-encode pdata.
 
-The current templates differ in acknowledgment defaults: Collector
-`wait_for_result` defaults true while the DFE OTAP template defaults false.
-Normalize this explicitly, along with channel/queue capacity, concurrency,
-compression, batch thresholds, retries, TLS/auth, and core affinity. Compare
-like-for-like resource budgets and report actual CPU usage rather than treating
-Go's `GOMAXPROCS` as equivalent to every DFE thread configuration.
+Additional tests forbid object conversion during actual debug-factory calls for
+both protobuf and real Arrow input, compare native views against the object
+model, decode physically coalesced/split Arrow records with the existing consumer,
+exercise malformed data and count transitions, test byte bounds and atomic
+failures, verify pool-safe asynchronous ownership, persist/replay requests,
+and retry only selected native records.
 
-Run OTLP-to-OTLP and OTAP-to-OTAP, with and without batching; then add read-only
-processing, mutation, retry/failure, fan-out, and OTLP durable-queue scenarios.
-Use logs per second, CPU time per delivered log, allocations, retained/RSS memory,
-latency distributions, accepted/delivered/dropped counts, and backend semantic
-validation. Verify zero unwanted object conversions with instrumentation, and
-verify native record splitting/coalescing separately from logical batching.
-Repeat at multiple batch sizes and offered loads with identical delivery
-guarantees. Record confidence/variance, not only the best result.
+A full DFE-versus-Collector comparison has not been run. DFE's
+[performance harness][perf-harness] provides matched OTLP/OTAP pipeline templates.
+Normalize acknowledgment mode explicitly: the inspected Collector template
+defaults `wait_for_result` true while the DFE OTAP template defaults false.
+Pin datasets/builds and match cores, queues, batching, compression, TLS/auth,
+concurrency, retries, and delivery guarantees. Report CPU/log, delivered logs/s,
+RSS, latency distributions, and semantic output validation at multiple loads.
 
-Before a production proposal, also require malformed/oversized/decompression
-tests, cancellation and shutdown/drain behavior, backpressure, partial failures,
-memory limits under cached multi-format fan-out, durable replay/upgrade behavior,
-and a compatibility inventory for Contrib components. Logs success alone does
-not establish metric/traces/profiles correctness.
-
-## Alternatives and unresolved decisions
-
-Making `plog.Logs` itself pluggable preserves the consumer signature, but couples
-neutral users to object packages and leaves no error channel on ordinary field
-accessors for a failed deferred decode. It also complicates mutation and
-reference semantics. Keeping object types and using explicit adapters makes
-those boundaries visible.
-
-A bytes-only fast path is smaller but cannot carry real Arrow records or
-alternative in-memory formats. An unrestricted `any` payload without a lifetime,
-count, and capability contract moves type/ownership mistakes into components.
-A global conversion graph adds policy and path-selection complexity not needed
-to test the central hypothesis.
-
-Open design questions include the final package/generic signal layout, native
-views' traversal and error APIs, retained-memory accounting and cache policy,
-whether converters may be lossy with explicit opt-in, exact native split
-contracts, protocol/schema negotiation, and staged legacy adapters. These need
-maintainer agreement before stable Collector interfaces change.
+The remaining architectural decisions are about stabilizing the public
+signal/view APIs, generated implementations, retained-memory accounting/cache
+policy, native-only factories, other signals/codecs, and rollout. Native debug
+views, attribute routing, fallible predecoded counts, and actual merge/split are
+implemented here; they are not deferred requirements.
 
 [contrib-receiver]: https://github.com/open-telemetry/opentelemetry-collector-contrib/blob/5185014bb71caedc116322fb7290c76cf3673dd4/receiver/otelarrowreceiver/internal/arrow/arrow.go
 [contrib-exporter]: https://github.com/open-telemetry/opentelemetry-collector-contrib/blob/5185014bb71caedc116322fb7290c76cf3673dd4/exporter/otelarrowexporter/otelarrow.go

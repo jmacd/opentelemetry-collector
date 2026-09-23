@@ -4,20 +4,28 @@
 package capabilityconsumer // import "go.opentelemetry.io/collector/service/internal/capabilityconsumer"
 
 import (
+	"context"
+
 	"go.opentelemetry.io/collector/consumer"
 	"go.opentelemetry.io/collector/consumer/xconsumer"
+	"go.opentelemetry.io/collector/pdata/xpdata/payload"
 )
 
 func NewLogs(logs consumer.Logs, capabilities consumer.Capabilities) consumer.Logs {
 	if logs.Capabilities() == capabilities {
 		return logs
 	}
+
 	return capLogs{Logs: logs, cap: capabilities}
 }
 
 type capLogs struct {
 	consumer.Logs
 	cap consumer.Capabilities
+}
+
+func (mts capLogs) ConsumeLogsPayload(ctx context.Context, p *payload.Payload) error {
+	return consumer.ConsumeLogsPayload(ctx, mts.Logs, p)
 }
 
 func (mts capLogs) Capabilities() consumer.Capabilities {

@@ -12,6 +12,7 @@ import (
 
 	"go.opentelemetry.io/collector/consumer"
 	"go.opentelemetry.io/collector/pdata/plog"
+	"go.opentelemetry.io/collector/pdata/xpdata/payload"
 )
 
 // NewLogs wraps multiple log consumers in a single one.
@@ -38,6 +39,17 @@ func NewLogs(lcs []consumer.Logs) consumer.Logs {
 type logsConsumer struct {
 	mutable  []consumer.Logs
 	readonly []consumer.Logs
+}
+
+func (lsc *logsConsumer) ConsumeLogsPayload(ctx context.Context, p *payload.Payload) error {
+	var errs error
+	for _, next := range lsc.mutable {
+		errs = multierr.Append(errs, consumer.ConsumeLogsPayload(ctx, next, p))
+	}
+	for _, next := range lsc.readonly {
+		errs = multierr.Append(errs, consumer.ConsumeLogsPayload(ctx, next, p))
+	}
+	return errs
 }
 
 func (lsc *logsConsumer) Capabilities() consumer.Capabilities {

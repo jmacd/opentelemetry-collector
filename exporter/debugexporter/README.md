@@ -60,6 +60,14 @@ exporters:
 
 ## Verbosity levels
 
+On this prototype branch, `--feature-gates=service.PluggableLogs` enables native
+logs views for compatible pipelines. Logs are read directly from OTLP bytes or
+OTAP Arrow records rather than converted to `plog.Logs`. Basic verbosity retains
+its summary; normal/detailed native output uses resource/scope/log JSON lines.
+This experimental format differs from the examples below, which describe the
+default, gate-disabled behavior. See the
+[integrated prototype](../../internal/pdataprototype/README.md).
+
 The following subsections describe the output from the exporter depending on the configured verbosity level - `basic`, `normal` and `detailed`.
 The default verbosity level is `basic`.
 

@@ -15,6 +15,7 @@ import (
 	"go.opentelemetry.io/collector/pdata/plog"
 	"go.opentelemetry.io/collector/pdata/pmetric"
 	"go.opentelemetry.io/collector/pdata/ptrace"
+	"go.opentelemetry.io/collector/pdata/xpdata/plogpayload"
 	"go.opentelemetry.io/collector/pipeline"
 )
 
@@ -48,6 +49,14 @@ func NewLogsRequest(
 	be, err := NewBaseExporter(set, pipeline.SignalLogs, pusher, options...)
 	if err != nil {
 		return nil, err
+	}
+
+	if be.PayloadPusher != nil {
+		registry, registryErr := plogpayload.NewRegistry()
+		if registryErr != nil {
+			return nil, registryErr
+		}
+		return &payloadLogsExporter{BaseExporter: be, registry: registry}, nil
 	}
 
 	lc, err := consumer.NewLogs(newConsumeLogs(converter, be, set.Logger), be.ConsumerOptions...)

@@ -78,6 +78,12 @@ func (rs *retrySender) Send(ctx context.Context, req request.Request) error {
 		MaxInterval:         rs.cfg.MaxInterval,
 	}
 	span := trace.SpanFromContext(ctx)
+	var owned request.Releasable
+	defer func() {
+		if owned != nil {
+			owned.Release()
+		}
+	}()
 	retryNum := int64(0)
 	var maxElapsedTime time.Time
 	if rs.cfg.MaxElapsedTime > 0 {
@@ -99,8 +105,21 @@ func (rs *retrySender) Send(ctx context.Context, req request.Request) error {
 			return fmt.Errorf("not retryable error: %w", err)
 		}
 
-		if errReq, ok := req.(request.ErrorHandler); ok {
-			req = errReq.OnError(err)
+		switch handler := req.(type) {
+		case request.FallibleErrorHandler:
+			next, selectionErr := handler.HandleError(err)
+			if selectionErr != nil {
+				return consumererror.NewPermanent(selectionErr)
+			}
+			if next != req {
+				if owned != nil {
+					owned.Release()
+				}
+				owned, _ = next.(request.Releasable)
+				req = next
+			}
+		case request.ErrorHandler:
+			req = handler.OnError(err)
 		}
 
 		backoffDelay := expBackoff.NextBackOff()

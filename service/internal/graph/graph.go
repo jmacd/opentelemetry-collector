@@ -21,6 +21,8 @@ import (
 	"slices"
 	"strings"
 
+	"go.opentelemetry.io/collector/pdata/xpdata/payload"
+
 	"go.uber.org/multierr"
 	"go.uber.org/zap"
 	"gonum.org/v1/gonum/graph"
@@ -333,6 +335,9 @@ func (g *Graph) buildComponents(ctx context.Context, set Settings) error {
 				cc := capabilityconsumer.NewLogs(next.(consumer.Logs), capability)
 				n.baseConsumer = cc
 				n.ConsumeLogsFunc = cc.ConsumeLogs
+				n.ConsumeLogsPayloadFunc = func(ctx context.Context, p *payload.Payload) error {
+					return consumer.ConsumeLogsPayload(ctx, cc, p)
+				}
 			case xpipeline.SignalProfiles:
 				cc := capabilityconsumer.NewProfiles(next.(xconsumer.Profiles), capability)
 				n.baseConsumer = cc

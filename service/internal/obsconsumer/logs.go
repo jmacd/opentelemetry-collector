@@ -12,6 +12,7 @@ import (
 	"go.opentelemetry.io/collector/consumer/consumererror"
 	"go.opentelemetry.io/collector/internal/telemetry"
 	"go.opentelemetry.io/collector/pdata/plog"
+	"go.opentelemetry.io/collector/pdata/xpdata/payload"
 	"go.opentelemetry.io/collector/service/internal/metadata"
 )
 
@@ -47,6 +48,34 @@ type obsLogs struct {
 	consumer consumer.Logs
 	set      Settings
 	compiledOptions
+}
+
+func (c obsLogs) ConsumeLogsPayload(ctx context.Context, p *payload.Payload) error {
+	items, err := p.ItemsCount()
+	if err != nil {
+		return consumererror.NewPermanent(err)
+	}
+	attrs := &c.withSuccessAttrs
+	defer func() { c.set.ItemCounter.Add(ctx, int64(items), *attrs) }()
+	if isEnabled(ctx, c.set.SizeCounter) {
+		size, sizeErr := p.BytesSize()
+		if sizeErr != nil {
+			attrs = &c.withFailureAttrs
+			return consumererror.NewPermanent(sizeErr)
+		}
+		defer func() { c.set.SizeCounter.Add(ctx, int64(size), *attrs) }()
+	}
+	err = consumer.ConsumeLogsPayload(ctx, c.consumer, p)
+	if err != nil {
+		if consumererror.IsDownstream(err) {
+			attrs = &c.withRefusedAttrs
+		} else {
+			attrs = &c.withFailureAttrs
+			err = consumererror.NewDownstream(err)
+		}
+		c.set.Logger.Debug("Logs pipeline component had an error", zap.Error(err), zap.Int("item count", items))
+	}
+	return err
 }
 
 // ConsumeLogs measures telemetry before calling ConsumeLogs because the data may be mutated downstream

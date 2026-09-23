@@ -167,6 +167,9 @@ func (qb *partitionBatcher) consumeInternal(ctx context.Context, req request.Req
 	// - Last result may not have enough data to be flushed.
 
 	// Logic on how to deal with the current batch:
+	if owned, ok := qb.currentBatch.req.(request.Releasable); ok {
+		owned.Release()
+	}
 	qb.currentBatch.req = reqList[0]
 	qb.currentBatch.done = append(qb.currentBatch.done, done)
 
@@ -298,6 +301,9 @@ func (qb *partitionBatcher) flush(ctx context.Context, req request.Request, done
 	qb.stopWG.Add(1)
 	qb.wp.execute(func() {
 		defer qb.stopWG.Done()
+		if owned, ok := req.(request.Releasable); ok {
+			defer owned.Release()
+		}
 		done.OnDone(qb.consumeFunc(ctx, req))
 	})
 }

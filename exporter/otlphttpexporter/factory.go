@@ -169,6 +169,7 @@ func createLogs(
 
 	return exporterhelper.NewLogs(ctx, set, cfg,
 		oce.pushLogs,
+		exporterhelper.WithLogsPayload(oce.pushLogsPayload),
 		exporterhelper.WithStart(oce.start),
 		exporterhelper.WithCapabilities(consumer.Capabilities{MutatesData: false}),
 		// explicitly disable since we rely on http.Client timeout logic.

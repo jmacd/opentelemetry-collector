@@ -92,3 +92,7 @@ replace go.opentelemetry.io/collector/receiver/receivertest => ../../../receiver
 replace go.opentelemetry.io/collector/pipeline/xpipeline => ../../../pipeline/xpipeline
 
 replace go.opentelemetry.io/collector/internal/componentalias => ../../../internal/componentalias
+
+replace go.opentelemetry.io/collector/pdata/xpdata => ../../../pdata/xpdata
+
+replace go.opentelemetry.io/collector/client => ../../../client

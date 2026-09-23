@@ -43,6 +43,16 @@ The following settings are configurable:
 
 ## Advanced Configuration
 
+### Experimental native logs
+
+On this prototype branch, `--feature-gates=service.PluggableLogs` retains OTLP
+protobuf logs as bytes at HTTP and gRPC ingress. Known wire fields are validated
+without creating pdata message objects, and compatible components consume native
+payloads/views. Legacy components and HTTP JSON retain their object-codec boundary.
+The gate is disabled by default. See the
+[integrated prototype](../../internal/pdataprototype/README.md) and
+[RFC](../../docs/rfcs/pluggable-pdata.md).
+
 Several helper files are leveraged to provide additional capabilities automatically:
 
 - [gRPC settings](https://github.com/open-telemetry/opentelemetry-collector/blob/main/config/configgrpc/README.md) including CORS

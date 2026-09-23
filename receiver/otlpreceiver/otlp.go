@@ -23,6 +23,7 @@ import (
 	"go.opentelemetry.io/collector/pdata/pmetric/pmetricotlp"
 	"go.opentelemetry.io/collector/pdata/pprofile/pprofileotlp"
 	"go.opentelemetry.io/collector/pdata/ptrace/ptraceotlp"
+	"go.opentelemetry.io/collector/pdata/xpdata/plogpayload"
 	"go.opentelemetry.io/collector/receiver"
 	"go.opentelemetry.io/collector/receiver/otlpreceiver/internal/logs"
 	"go.opentelemetry.io/collector/receiver/otlpreceiver/internal/metrics"
@@ -106,7 +107,11 @@ func (r *otlpReceiver) startGRPCServer(ctx context.Context, host component.Host)
 	}
 
 	if r.nextLogs != nil {
-		plogotlp.RegisterGRPCServer(r.serverGRPC, logs.New(r.nextLogs, r.obsrepGRPC))
+		if plogpayload.FeatureGate.IsEnabled() {
+			registerPayloadLogs(r.serverGRPC, logs.New(r.nextLogs, r.obsrepGRPC))
+		} else {
+			plogotlp.RegisterGRPCServer(r.serverGRPC, logs.New(r.nextLogs, r.obsrepGRPC))
+		}
 	}
 
 	if r.nextProfiles != nil {

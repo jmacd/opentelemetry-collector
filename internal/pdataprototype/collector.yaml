@@ -1,0 +1,48 @@
+receivers:
+  otlp:
+    protocols:
+      grpc:
+        endpoint: 127.0.0.1:14317
+      http:
+        endpoint: 127.0.0.1:14318
+
+connectors:
+  view_route:
+    source: resource
+    key: service.name
+    value: checkout
+    match: [logs/checkout]
+    other: [logs/other]
+
+exporters:
+  debug/checkout:
+    verbosity: detailed
+    sampling_initial: 100
+    sampling_thereafter: 1
+    sending_queue:
+      sizer: items
+      queue_size: 1024
+      wait_for_result: true
+      batch:
+        min_size: 3
+        max_size: 3
+        flush_timeout: 50ms
+  debug/other:
+    verbosity: detailed
+    sampling_initial: 100
+    sampling_thereafter: 1
+
+service:
+  telemetry:
+    metrics:
+      level: none
+  pipelines:
+    logs/input:
+      receivers: [otlp]
+      exporters: [view_route]
+    logs/checkout:
+      receivers: [view_route]
+      exporters: [debug/checkout]
+    logs/other:
+      receivers: [view_route]
+      exporters: [debug/other]

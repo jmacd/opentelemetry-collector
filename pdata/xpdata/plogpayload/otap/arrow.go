@@ -1,7 +1,7 @@
 // Copyright The OpenTelemetry Authors
 // SPDX-License-Identifier: Apache-2.0
 
-package logs
+package otap
 
 import (
 	"errors"
@@ -16,8 +16,10 @@ import (
 	logsotlp "github.com/open-telemetry/otel-arrow/go/pkg/otel/logs/otlp"
 	"github.com/open-telemetry/otel-arrow/go/pkg/record_message"
 
-	"go.opentelemetry.io/collector/internal/pdataprototype/payload"
 	"go.opentelemetry.io/collector/pdata/plog"
+	"go.opentelemetry.io/collector/pdata/xpdata/entity"
+	"go.opentelemetry.io/collector/pdata/xpdata/payload"
+	"go.opentelemetry.io/collector/pdata/xpdata/plogpayload"
 )
 
 // Records owns groups of real OTAP main/related Arrow records, not IPC bytes.
@@ -27,8 +29,8 @@ type Records struct {
 	items   int
 }
 
-func (*Records) Format() payload.Format { return ArrowFormat }
-func (r *Records) ItemsCount() int      { return r.items }
+func (*Records) Format() payload.Format     { return plogpayload.ArrowFormat }
+func (r *Records) ItemsCount() (int, error) { return r.items, nil }
 
 // Batches returns borrowed immutable records, valid for the payload's lifetime.
 func (r *Records) Batches() [][]*record_message.RecordMessage { return r.batches }
@@ -85,7 +87,28 @@ func NewArrowCodec(options ...config.Option) *ArrowCodec {
 }
 
 func (c *ArrowCodec) Codec() payload.Codec {
-	return payload.Codec{Format: ArrowFormat, Decode: decodeRecords, Encode: c.encode, Merge: mergeRecords}
+	toProto := func(rep payload.Representation) (payload.Representation, error) {
+		view, err := arrowView(rep)
+		if err != nil {
+			return nil, err
+		}
+		buf, err := plogpayload.MarshalView(view)
+		if err != nil {
+			return nil, err
+		}
+		return plogpayload.NewProtoRepresentation(buf), nil
+	}
+	return payload.Codec{
+		Format: plogpayload.ArrowFormat, Decode: decodeRecords, Encode: c.encode, Merge: mergeRecords,
+		View: arrowView, Slice: sliceRecords, Direct: map[payload.Format]payload.ConvertFunc{plogpayload.ProtoFormat: toProto},
+		Size: func(rep payload.Representation) (int, error) {
+			wire, err := toProto(rep)
+			if err != nil {
+				return 0, err
+			}
+			return len(wire.(*plogpayload.Proto).Bytes()), nil
+		},
+	}
 }
 
 func (c *ArrowCodec) Close() error {
@@ -109,7 +132,7 @@ func decodeRecords(input payload.Representation) (payload.Representation, error)
 	if err != nil {
 		return nil, err
 	}
-	return newObjects(ld), nil
+	return plogpayload.NewObjects(ld), nil
 }
 
 func decodeArrow(src *Records) (plog.Logs, error) {
@@ -137,12 +160,15 @@ func decodeArrow(src *Records) (plog.Logs, error) {
 }
 
 func (c *ArrowCodec) encode(input payload.Representation) (out payload.Representation, err error) {
-	src, ok := input.(*Objects)
+	src, ok := input.(*plogpayload.Objects)
 	if !ok {
 		return nil, fmt.Errorf("expected objects, got %T", input)
 	}
-	for i := 0; i < src.data.ResourceLogs().Len(); i++ {
-		rl := src.data.ResourceLogs().At(i)
+	for i := 0; i < src.Logs().ResourceLogs().Len(); i++ {
+		rl := src.Logs().ResourceLogs().At(i)
+		if entity.ResourceEntityRefs(rl.Resource()).Len() != 0 {
+			return nil, errors.New("this OTAP version cannot preserve resource entity references")
+		}
 		if rl.ScopeLogs().Len() == 0 {
 			return nil, errors.New("arrow encoding cannot preserve an empty resource group")
 		}
@@ -170,7 +196,7 @@ func (c *ArrowCodec) encode(input payload.Representation) (out payload.Represent
 	builder := c.producer.LogsBuilder()
 	for range 6 {
 		builder.RelatedData().Reset()
-		if appendErr := builder.Append(src.data); appendErr != nil {
+		if appendErr := builder.Append(src.Logs()); appendErr != nil {
 			return nil, appendErr
 		}
 		main, buildErr := builder.Build()
@@ -194,12 +220,15 @@ func (c *ArrowCodec) encode(input payload.Representation) (out payload.Represent
 		batch := append([]*record_message.RecordMessage{
 			record_message.NewLogsMessage(c.producer.LogsRecordBuilderExt().SchemaID(), main),
 		}, related...)
-		return &Records{batches: [][]*record_message.RecordMessage{batch}, items: src.ItemsCount()}, nil
+		return &Records{batches: [][]*record_message.RecordMessage{batch}, items: src.Logs().LogRecordCount()}, nil
 	}
 	return nil, errors.New("arrow schema did not stabilize after six attempts")
 }
 
 func mergeRecords(inputs []payload.Representation) (payload.Representation, error) {
+	if len(inputs) > 1 {
+		return coalesceRecords(inputs)
+	}
 	dst := &Records{}
 	for _, input := range inputs {
 		src, ok := input.(*Records)

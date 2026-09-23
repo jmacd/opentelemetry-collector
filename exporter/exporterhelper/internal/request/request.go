@@ -31,6 +31,18 @@ type Request interface {
 	BytesSize() int
 }
 
+// Releasable is implemented by independently owned MergeSplit results.
+// The batcher releases them after replacement or final consumption.
+type Releasable interface {
+	Release()
+}
+
+// FallibleErrorHandler supports validated native partial retries. A changed
+// request transfers ownership to the retry sender.
+type FallibleErrorHandler interface {
+	HandleError(error) (Request, error)
+}
+
 // ErrorHandler is an optional interface that can be implemented by Request to provide a way handle partial
 // temporary failures. For example, if some items failed to process and can be retried, this interface allows to
 // return a new Request that contains the items left to be sent. Otherwise, the original Request should be returned.

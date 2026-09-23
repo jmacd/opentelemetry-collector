@@ -4,6 +4,7 @@
 package connector // import "go.opentelemetry.io/collector/connector"
 
 import (
+	"context"
 	"errors"
 	"fmt"
 
@@ -12,6 +13,7 @@ import (
 	"go.opentelemetry.io/collector/connector/internal"
 	"go.opentelemetry.io/collector/consumer"
 	"go.opentelemetry.io/collector/internal/fanoutconsumer"
+	"go.opentelemetry.io/collector/pdata/xpdata/payload"
 	"go.opentelemetry.io/collector/pipeline"
 )
 
@@ -69,3 +71,7 @@ func (r *logsRouter) Consumer(pipelineIDs ...pipeline.ID) (consumer.Logs, error)
 }
 
 func (r *logsRouter) privateFunc() {}
+
+func (r *logsRouter) ConsumeLogsPayload(ctx context.Context, p *payload.Payload) error {
+	return consumer.ConsumeLogsPayload(ctx, r.Logs, p)
+}

@@ -114,3 +114,11 @@ replace go.opentelemetry.io/collector/confmap => ../../confmap
 replace go.opentelemetry.io/collector/internal/testutil => ../../internal/testutil
 
 replace go.opentelemetry.io/collector/internal/componentalias => ../../internal/componentalias
+
+replace go.opentelemetry.io/collector/pdata/testdata => ../../pdata/testdata
+
+replace go.opentelemetry.io/collector/pdata/pprofile => ../../pdata/pprofile
+
+replace go.opentelemetry.io/collector/pdata/xpdata => ../../pdata/xpdata
+
+replace go.opentelemetry.io/collector/consumer/consumererror => ../../consumer/consumererror

@@ -24,6 +24,7 @@ type capabilitiesNode struct {
 	consumer.ConsumeTracesFunc
 	consumer.ConsumeMetricsFunc
 	consumer.ConsumeLogsFunc
+	consumer.ConsumeLogsPayloadFunc
 	xconsumer.ConsumeProfilesFunc
 }
 
