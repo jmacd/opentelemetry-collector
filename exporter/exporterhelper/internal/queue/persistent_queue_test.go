@@ -13,10 +13,12 @@ import (
 	"sync/atomic"
 	"syscall"
 	"testing"
+	"testing/synctest"
 	"time"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	"google.golang.org/protobuf/proto"
 
 	"go.opentelemetry.io/collector/component"
 	"go.opentelemetry.io/collector/component/componenttest"
@@ -1187,101 +1189,247 @@ func itemIndexArrayToBytes(arr []uint64) []byte {
 func newSettingsWithFastTrack(sizerType request.SizerType, capacity int64) Settings[intRequest] {
 	set := newSettingsWithStorage(sizerType, capacity)
 	set.FastTrack = true
+	set.NumConsumers = 1
 	return set
 }
 
-func TestPersistentQueue_FastTrack_ConsumerIdle(t *testing.T) {
-	consumed := &atomic.Int64{}
-	pq := newPersistentQueue[intRequest](newSettingsWithFastTrack(request.SizerTypeRequests, 1000))
-	aq := newAsyncQueue[intRequest](pq, 2, func(_ context.Context, val intRequest, done Done) {
-		consumed.Add(int64(val))
-		done.OnDone(nil)
-	}, nil)
-	require.NoError(t, aq.Start(context.Background(), hosttest.NewHost(map[component.ID]component.Component{
-		{}: storagetest.NewMockStorageExtension(nil),
-	})))
-
-	// Give consumers time to reach the idle state (waiting on hasMoreElements).
-	time.Sleep(20 * time.Millisecond)
-
-	// Send requests — consumers are idle so these should go through the fast track.
-	require.NoError(t, aq.Offer(context.Background(), intRequest(10)))
-	require.NoError(t, aq.Offer(context.Background(), intRequest(20)))
-
-	// Fast track is synchronous (wait-for-result), so consumed should be immediate.
-	assert.Equal(t, int64(30), consumed.Load())
-
-	// Nothing should be in the persistent queue because requests bypassed disk.
-	assert.Equal(t, int64(0), pq.Size())
-
-	require.NoError(t, aq.Shutdown(context.Background()))
+type fastTrackStorage struct {
+	storage.Client
+	operations int
 }
 
-func TestPersistentQueue_FastTrack_ConsumerBusy(t *testing.T) {
-	consumed := &atomic.Int64{}
-	pq := newPersistentQueue[intRequest](newSettingsWithFastTrack(request.SizerTypeRequests, 1000))
-	aq := newAsyncQueue[intRequest](pq, 1, func(_ context.Context, val intRequest, done Done) {
-		consumed.Add(int64(val))
-		done.OnDone(nil)
-	}, nil)
-	require.NoError(t, aq.Start(context.Background(), hosttest.NewHost(map[component.ID]component.Component{
-		{}: storagetest.NewMockStorageExtension(nil),
-	})))
-
-	// Give consumer time to reach idle state.
-	time.Sleep(20 * time.Millisecond)
-
-	// First request takes the fast track (consumer is idle and blocks on it).
-	// Second request should fall through to the persistent queue because the consumer
-	// is now busy processing the first one.
-	wg := sync.WaitGroup{}
-	wg.Go(func() {
-		assert.NoError(t, aq.Offer(context.Background(), intRequest(10)))
-	})
-	// Small delay so first offer acquires the consumer.
-	time.Sleep(10 * time.Millisecond)
-
-	// This one goes to disk since the consumer is busy with the fast-track request.
-	require.NoError(t, aq.Offer(context.Background(), intRequest(20)))
-	wg.Wait()
-
-	// Both should eventually be consumed.
-	assert.EventuallyWithT(t, func(c *assert.CollectT) {
-		assert.Equal(c, int64(30), consumed.Load())
-	}, 1*time.Second, 10*time.Millisecond)
-
-	require.NoError(t, aq.Shutdown(context.Background()))
+func (s *fastTrackStorage) Batch(ctx context.Context, ops ...*storage.Operation) error {
+	s.operations += len(ops)
+	return s.Client.Batch(ctx, ops...)
 }
 
-func TestPersistentQueue_FastTrack_Mixed(t *testing.T) {
-	consumed := &atomic.Int64{}
-	numMessages := 100
-	pq := newPersistentQueue[intRequest](newSettingsWithFastTrack(request.SizerTypeRequests, int64(numMessages)))
-	aq := newAsyncQueue[intRequest](pq, 4, func(_ context.Context, val intRequest, done Done) {
-		consumed.Add(int64(val))
-		done.OnDone(nil)
-	}, nil)
-	require.NoError(t, aq.Start(context.Background(), hosttest.NewHost(map[component.ID]component.Component{
-		{}: storagetest.NewMockStorageExtension(nil),
-	})))
+type fastTrackEncoding struct {
+	Encoding[intRequest]
+	marshaled, unmarshaled int
+}
 
-	// Give consumers time to reach idle state.
-	time.Sleep(20 * time.Millisecond)
+func (e *fastTrackEncoding) Marshal(ctx context.Context, req intRequest) ([]byte, error) {
+	e.marshaled++
+	return e.Encoding.Marshal(ctx, req)
+}
 
-	// Send many requests concurrently — some will go through fast track, some through disk.
-	wg := sync.WaitGroup{}
-	for i := range numMessages {
-		wg.Go(func() {
-			assert.NoError(t, aq.Offer(context.Background(), intRequest(i+1)))
+func (e *fastTrackEncoding) Unmarshal(buf []byte) (context.Context, intRequest, error) {
+	e.unmarshaled++
+	return e.Encoding.Unmarshal(buf)
+}
+
+func TestPersistentQueue_FastTrack_Accounting(t *testing.T) {
+	for _, szt := range []request.SizerType{request.SizerTypeRequests, request.SizerTypeItems, request.SizerTypeBytes} {
+		t.Run(szt.String(), func(t *testing.T) {
+			synctest.Test(t, func(t *testing.T) {
+				size := request.NewSizer(szt).Sizeof(intRequest(10))
+				set := newSettingsWithFastTrack(szt, size)
+				enc := &fastTrackEncoding{Encoding: set.Encoding}
+				set.Encoding = enc
+				pq := newPersistentQueue(set).(*persistentQueue[intRequest])
+				require.NoError(t, pq.Start(t.Context(), hosttest.NewHost(map[component.ID]component.Component{
+					{}: storagetest.NewMockStorageExtension(nil),
+				})))
+				client := &fastTrackStorage{Client: pq.client}
+				pq.client = client
+
+				result := make(chan error, 1)
+				go func() { result <- pq.Offer(t.Context(), 10) }()
+				synctest.Wait()
+				assert.Empty(t, result, "handoff must not acknowledge export")
+				assert.Equal(t, size, pq.Size())
+				require.ErrorIs(t, pq.Offer(t.Context(), 10), ErrQueueIsFull)
+
+				_, req, done, ok := pq.Read(t.Context())
+				require.True(t, ok)
+				assert.Equal(t, intRequest(10), req)
+				assert.Equal(t, size, pq.Size(), "dispatch must not free capacity")
+				exportErr := errors.New("export failed")
+				done.OnDone(exportErr)
+				pq.refCounter.Unref(req)
+				synctest.Wait()
+				require.ErrorIs(t, <-result, exportErr)
+				assert.Zero(t, pq.Size())
+				assert.Zero(t, client.operations)
+				assert.Zero(t, enc.marshaled)
+				assert.Zero(t, enc.unmarshaled)
+				require.NoError(t, pq.Shutdown(t.Context()))
+			})
 		})
 	}
-	wg.Wait()
+}
 
-	// All requests should eventually be consumed.
-	expectedTotal := int64(numMessages * (numMessages + 1) / 2) // sum 1..100
-	assert.EventuallyWithT(t, func(c *assert.CollectT) {
-		assert.Equal(c, expectedTotal, consumed.Load())
-	}, 5*time.Second, 10*time.Millisecond)
+func TestPersistentQueue_FastTrack_Replay(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		set := newSettingsWithFastTrack(request.SizerTypeItems, 1000)
+		pq := newPersistentQueue(set).(*persistentQueue[intRequest])
+		require.NoError(t, pq.Start(t.Context(), hosttest.NewHost(map[component.ID]component.Component{
+			{}: storagetest.NewMockStorageExtension(nil),
+		})))
+		result := make(chan error, 1)
+		go func() { result <- pq.Offer(t.Context(), 10) }()
+		synctest.Wait()
+		for _, req := range []intRequest{20, 30, 40} {
+			require.NoError(t, pq.Offer(t.Context(), req), "full fast-track lane must fall back to storage")
+		}
+		buf, err := pq.client.Get(t.Context(), metadataKey)
+		require.NoError(t, err)
+		var metadata PersistentMetadata
+		require.NoError(t, proto.Unmarshal(buf, &metadata))
+		assert.Equal(t, int64(90), metadata.ItemsSize)
+		assert.Equal(t, int64(900), metadata.BytesSize)
 
-	require.NoError(t, aq.Shutdown(context.Background()))
+		var pending Done
+		for _, want := range []intRequest{10, 20, 11, 30, 12, 40} {
+			_, req, done, ok := pq.Read(t.Context())
+			require.True(t, ok)
+			assert.Equal(t, want, req)
+			if want == 12 {
+				pending = done
+				pq.refCounter.Unref(req)
+				continue
+			}
+			done.OnDone(nil)
+			pq.refCounter.Unref(req)
+			if want < 20 {
+				synctest.Wait()
+				require.NoError(t, <-result)
+				go func() { result <- pq.Offer(t.Context(), want+1) }()
+				synctest.Wait()
+			}
+		}
+		assert.Equal(t, int64(12), pq.Size(), "draining storage must not reset fast-track accounting")
+		pending.OnDone(nil)
+		synctest.Wait()
+		require.NoError(t, <-result)
+		assert.Zero(t, pq.Size())
+		assert.Zero(t, set.ReferenceCounter.(*fakeReferenceCounter).ref)
+		require.NoError(t, pq.Shutdown(t.Context()))
+	})
+}
+
+func TestPersistentQueue_FastTrack_FullStorage(t *testing.T) {
+	for _, overflow := range []bool{false, true} {
+		t.Run(strconv.FormatBool(overflow), func(t *testing.T) {
+			synctest.Test(t, func(t *testing.T) {
+				ext := storagetest.NewMockStorageExtension(nil)
+				old := createTestPersistentQueueWithRequestsSizer(t, ext, 1)
+				require.NoError(t, old.Offer(t.Context(), 1))
+				require.NoError(t, old.Shutdown(t.Context()))
+
+				set := newSettingsWithFastTrack(request.SizerTypeRequests, 1)
+				set.FastTrackOnOverflow = overflow
+				pq := newPersistentQueue(set).(*persistentQueue[intRequest])
+				require.NoError(t, pq.Start(t.Context(), hosttest.NewHost(map[component.ID]component.Component{{}: ext})))
+				result := make(chan error, 1)
+				go func() { result <- pq.Offer(t.Context(), 2) }()
+				synctest.Wait()
+				if overflow {
+					assert.Empty(t, result)
+					assert.Equal(t, int64(2), pq.Size())
+					require.ErrorIs(t, pq.Offer(t.Context(), 3), ErrQueueIsFull)
+					_, req, done, ok := pq.Read(t.Context())
+					require.True(t, ok)
+					assert.Equal(t, intRequest(2), req, "fresh data must not wait for the backlog")
+					done.OnDone(nil)
+					pq.refCounter.Unref(req)
+					synctest.Wait()
+					require.NoError(t, <-result)
+				} else {
+					require.ErrorIs(t, <-result, ErrQueueIsFull)
+				}
+				_, req, done, ok := pq.Read(t.Context())
+				require.True(t, ok)
+				assert.Equal(t, intRequest(1), req)
+				done.OnDone(nil)
+				pq.refCounter.Unref(req)
+				assert.Zero(t, pq.Size())
+				require.NoError(t, pq.Shutdown(t.Context()))
+			})
+		})
+	}
+}
+
+func TestPersistentQueue_FastTrack_StorageReadFailure(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		set := newSettingsWithFastTrack(request.SizerTypeRequests, 10)
+		pq := newPersistentQueue(set).(*persistentQueue[intRequest])
+		require.NoError(t, pq.Start(t.Context(), hosttest.NewHost(map[component.ID]component.Component{
+			{}: storagetest.NewMockStorageExtension(nil),
+		})))
+		result := make(chan error, 1)
+		go func() { result <- pq.Offer(t.Context(), 1) }()
+		synctest.Wait()
+		require.NoError(t, pq.Offer(t.Context(), 2))
+		require.NoError(t, pq.client.Set(t.Context(), getItemKey(0), []byte("invalid")))
+		_, req, done, ok := pq.Read(t.Context())
+		require.True(t, ok)
+		done.OnDone(nil)
+		pq.refCounter.Unref(req)
+		require.NoError(t, <-result)
+
+		go func() { result <- pq.Offer(t.Context(), 3) }()
+		synctest.Wait()
+		_, req, done, ok = pq.Read(t.Context())
+		require.True(t, ok)
+		assert.Equal(t, intRequest(3), req, "a failed stored read must not strand the fresh lane")
+		done.OnDone(nil)
+		pq.refCounter.Unref(req)
+		require.NoError(t, <-result)
+		assert.Zero(t, pq.Size())
+		require.NoError(t, pq.Shutdown(t.Context()))
+	})
+}
+
+func TestPersistentQueue_ShutdownWaitingOffers(t *testing.T) {
+	for _, fastTrack := range []bool{false, true} {
+		t.Run(strconv.FormatBool(fastTrack), func(t *testing.T) {
+			synctest.Test(t, func(t *testing.T) {
+				set := newSettingsWithFastTrack(request.SizerTypeRequests, 1)
+				set.FastTrack = fastTrack
+				set.BlockOnOverflow = true
+				pq := newPersistentQueue(set).(*persistentQueue[intRequest])
+				require.NoError(t, pq.Start(t.Context(), hosttest.NewHost(map[component.ID]component.Component{
+					{}: storagetest.NewMockStorageExtension(nil),
+				})))
+				first, second := make(chan error, 1), make(chan error, 1)
+				go func() { first <- pq.Offer(t.Context(), 10) }()
+				synctest.Wait()
+				go func() { second <- pq.Offer(t.Context(), 20) }()
+				ctx, cancel := context.WithCancel(t.Context())
+				canceled := make(chan error, 2)
+				for range 2 {
+					go func() { canceled <- pq.Offer(ctx, 20) }()
+				}
+				synctest.Wait()
+				cancel()
+				require.NoError(t, pq.Shutdown(t.Context()))
+				synctest.Wait()
+				assert.True(t, experr.IsShutdownErr(<-second))
+				for range 2 {
+					require.ErrorIs(t, <-canceled, context.Canceled)
+				}
+				if !fastTrack {
+					require.NoError(t, <-first)
+					_, _, _, ok := pq.Read(t.Context())
+					assert.False(t, ok, "stored requests must remain for restart")
+					return
+				}
+				assert.Empty(t, first)
+
+				_, req, done, ok := pq.Read(t.Context())
+				require.True(t, ok, "shutdown must still drain unpersisted requests")
+				assert.Equal(t, intRequest(10), req)
+				exportErr := experr.NewShutdownErr(errors.New("export stopped"))
+				done.OnDone(exportErr)
+				pq.refCounter.Unref(req)
+				synctest.Wait()
+				require.ErrorIs(t, <-first, exportErr)
+				assert.Zero(t, pq.Size())
+				_, _, _, ok = pq.Read(t.Context())
+				assert.False(t, ok)
+				assert.True(t, experr.IsShutdownErr(pq.Offer(t.Context(), 30)))
+			})
+		})
+	}
 }

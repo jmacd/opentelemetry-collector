@@ -41,6 +41,7 @@ func NewQueueBatch(
 	next sender.SendFunc[request.Request],
 ) (*QueueBatch, error) {
 	b, err := NewBatcher(cfg.Batch, batcherSettings[request.Request]{
+		refCounter:  set.ReferenceCounter,
 		partitioner: set.Partitioner,
 		mergeCtx:    set.MergeCtx,
 		next:        next,
@@ -57,18 +58,19 @@ func NewQueueBatch(
 	}
 
 	q, err := queue.NewQueue(queue.Settings[request.Request]{
-		SizerType:        cfg.Sizer,
-		Capacity:         cfg.QueueSize,
-		NumConsumers:     cfg.NumConsumers,
-		WaitForResult:    cfg.WaitForResult,
-		FastTrack:        cfg.FastTrack,
-		BlockOnOverflow:  cfg.BlockOnOverflow,
-		Signal:           set.Signal,
-		StorageID:        cfg.StorageID,
-		ReferenceCounter: set.ReferenceCounter,
-		Encoding:         set.Encoding,
-		ID:               set.ID,
-		Telemetry:        set.Telemetry,
+		SizerType:           cfg.Sizer,
+		Capacity:            cfg.QueueSize,
+		NumConsumers:        cfg.NumConsumers,
+		WaitForResult:       cfg.WaitForResult,
+		FastTrack:           cfg.FastTrack,
+		FastTrackOnOverflow: cfg.FastTrackOnOverflow,
+		BlockOnOverflow:     cfg.BlockOnOverflow,
+		Signal:              set.Signal,
+		StorageID:           cfg.StorageID,
+		ReferenceCounter:    set.ReferenceCounter,
+		Encoding:            set.Encoding,
+		ID:                  set.ID,
+		Telemetry:           set.Telemetry,
 	}, b.Consume)
 	if err != nil {
 		return nil, err

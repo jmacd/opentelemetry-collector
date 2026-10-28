@@ -23,6 +23,7 @@ type Batcher[T any] interface {
 }
 
 type batcherSettings[T any] struct {
+	refCounter  queue.ReferenceCounter[T]
 	partitioner Partitioner[T]
 	mergeCtx    func(context.Context, context.Context) context.Context
 	next        sender.SendFunc[T]
@@ -38,10 +39,10 @@ func NewBatcher(cfg configoptional.Optional[BatchConfig], set batcherSettings[re
 	sizer := request.NewSizer(cfg.Get().Sizer)
 
 	if set.partitioner == nil {
-		return newShardedBatcher(*cfg.Get(), sizer, set.mergeCtx, newWorkerPool(set.maxWorkers), set.next, set.logger, 1)
+		return newShardedBatcher(*cfg.Get(), sizer, set.refCounter, set.mergeCtx, newWorkerPool(set.maxWorkers), set.next, set.logger, 1)
 	}
 
-	mb, err := newMultiBatcher(*cfg.Get(), sizer, newWorkerPool(set.maxWorkers), set.partitioner, set.mergeCtx, set.next, set.logger)
+	mb, err := newMultiBatcher(*cfg.Get(), sizer, set.refCounter, newWorkerPool(set.maxWorkers), set.partitioner, set.mergeCtx, set.next, set.logger)
 	if err != nil {
 		return nil, fmt.Errorf("error during creating multi batcher: %w", err)
 	}

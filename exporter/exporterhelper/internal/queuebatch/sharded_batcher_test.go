@@ -21,7 +21,7 @@ import (
 
 func TestShardedBatcherRequiresPositiveShardCount(t *testing.T) {
 	sink := requesttest.NewSink()
-	sb, err := newShardedBatcher(BatchConfig{}, request.NewItemsSizer(), nil, newWorkerPool(1), sink.Export, zap.NewNop(), 0)
+	sb, err := newShardedBatcher(BatchConfig{}, request.NewItemsSizer(), nil, nil, newWorkerPool(1), sink.Export, zap.NewNop(), 0)
 
 	require.Error(t, err)
 	assert.Nil(t, sb)
@@ -51,7 +51,7 @@ func TestShardedBatcherOneShardFlushesOnMinSize(t *testing.T) {
 		FlushTimeout: 0,
 		Sizer:        request.SizerTypeItems,
 		MinSize:      10,
-	}, request.NewItemsSizer(), nil, newWorkerPool(1), sink.Export, zap.NewNop(), 1)
+	}, request.NewItemsSizer(), nil, nil, newWorkerPool(1), sink.Export, zap.NewNop(), 1)
 	require.NoError(t, err)
 	require.NoError(t, sb.Start(context.Background(), componenttest.NewNopHost()))
 	t.Cleanup(func() {
@@ -74,7 +74,7 @@ func TestShardedBatcherMultipleShardsFlushOnMinSize(t *testing.T) {
 		FlushTimeout: 0,
 		Sizer:        request.SizerTypeItems,
 		MinSize:      10,
-	}, request.NewItemsSizer(), nil, newWorkerPool(2), sink.Export, zap.NewNop(), 2)
+	}, request.NewItemsSizer(), nil, nil, newWorkerPool(2), sink.Export, zap.NewNop(), 2)
 	require.NoError(t, err)
 	require.NoError(t, sb.Start(context.Background(), componenttest.NewNopHost()))
 	t.Cleanup(func() {
@@ -103,7 +103,7 @@ func TestShardedBatcherOneShardFlushesOnTimeout(t *testing.T) {
 		FlushTimeout: 50 * time.Millisecond,
 		Sizer:        request.SizerTypeItems,
 		MinSize:      10,
-	}, request.NewItemsSizer(), nil, newWorkerPool(1), sink.Export, zap.NewNop(), 1)
+	}, request.NewItemsSizer(), nil, nil, newWorkerPool(1), sink.Export, zap.NewNop(), 1)
 	require.NoError(t, err)
 	require.NoError(t, sb.Start(context.Background(), componenttest.NewNopHost()))
 	t.Cleanup(func() {
@@ -125,7 +125,7 @@ func TestShardedBatcherOneShardDrainsOnShutdown(t *testing.T) {
 		FlushTimeout: 0,
 		Sizer:        request.SizerTypeItems,
 		MinSize:      10,
-	}, request.NewItemsSizer(), nil, newWorkerPool(1), sink.Export, zap.NewNop(), 1)
+	}, request.NewItemsSizer(), nil, nil, newWorkerPool(1), sink.Export, zap.NewNop(), 1)
 	require.NoError(t, err)
 	require.NoError(t, sb.Start(context.Background(), componenttest.NewNopHost()))
 
@@ -146,7 +146,7 @@ func TestShardedBatcherMultipleShardsDrainOnShutdown(t *testing.T) {
 		FlushTimeout: 0,
 		Sizer:        request.SizerTypeItems,
 		MinSize:      10,
-	}, request.NewItemsSizer(), nil, newWorkerPool(2), sink.Export, zap.NewNop(), 2)
+	}, request.NewItemsSizer(), nil, nil, newWorkerPool(2), sink.Export, zap.NewNop(), 2)
 	require.NoError(t, err)
 	require.NoError(t, sb.Start(context.Background(), componenttest.NewNopHost()))
 

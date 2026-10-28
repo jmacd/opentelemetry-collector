@@ -34,6 +34,7 @@ type partitionBatcher struct {
 	cfg            BatchConfig
 	wp             *workerPool
 	sizer          request.Sizer
+	refCounter     queue.ReferenceCounter[request.Request]
 	mergeCtx       func(context.Context, context.Context) context.Context
 	consumeFunc    sender.SendFunc[request.Request]
 	stopWG         sync.WaitGroup
@@ -50,6 +51,7 @@ type partitionBatcher struct {
 func newPartitionBatcher(
 	cfg BatchConfig,
 	sizer request.Sizer,
+	refCounter queue.ReferenceCounter[request.Request],
 	mergeCtx func(context.Context, context.Context) context.Context,
 	wp *workerPool,
 	next sender.SendFunc[request.Request],
@@ -60,6 +62,7 @@ func newPartitionBatcher(
 		cfg:          cfg,
 		wp:           wp,
 		sizer:        sizer,
+		refCounter:   refCounter,
 		mergeCtx:     mergeCtx,
 		consumeFunc:  next,
 		shutdownCh:   make(chan struct{}, 1),
@@ -92,6 +95,7 @@ func (qb *partitionBatcher) consumeInternal(ctx context.Context, req request.Req
 			qb.currentBatchMu.Unlock()
 			return isActive
 		}
+		qb.refRequests(reqList)
 
 		// If more than one flush is required for this request, call done only when all flushes are done.
 		numRefs := len(reqList)
@@ -139,6 +143,12 @@ func (qb *partitionBatcher) consumeInternal(ctx context.Context, req request.Req
 		done.OnDone(mergeSplitErr)
 		qb.currentBatchMu.Unlock()
 		return isActive
+	}
+	// Acquire the replacement references first: a split can reuse the old
+	// container for a remainder whose export outlives the original caller.
+	qb.refRequests(reqList)
+	if qb.refCounter != nil {
+		qb.refCounter.Unref(qb.currentBatch.req)
 	}
 
 	// If more than one flush is required for this request, call done only when all flushes are done.
@@ -209,6 +219,16 @@ func (qb *partitionBatcher) Consume(ctx context.Context, req request.Request, do
 	if !qb.consumeInternal(ctx, req, done) {
 		// Not active partition then flush else let the timer/Shutdown do it's work.
 		qb.flushCurrentBatchOrRemovePartition()
+	}
+}
+
+// Each pending or exporting batch holds one additional reference, independent
+// of the queue and caller. Replacement or export completion releases it.
+func (qb *partitionBatcher) refRequests(reqs []request.Request) {
+	if qb.refCounter != nil {
+		for _, req := range reqs {
+			qb.refCounter.Ref(req)
+		}
 	}
 }
 
@@ -291,7 +311,11 @@ func (qb *partitionBatcher) flush(ctx context.Context, req request.Request, done
 	qb.stopWG.Add(1)
 	qb.wp.execute(func() {
 		defer qb.stopWG.Done()
-		done.OnDone(qb.consumeFunc(ctx, req))
+		err := qb.consumeFunc(ctx, req)
+		if qb.refCounter != nil {
+			qb.refCounter.Unref(req)
+		}
+		done.OnDone(err)
 	})
 }
 

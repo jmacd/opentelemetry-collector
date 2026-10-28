@@ -29,6 +29,7 @@ func TestMultiBatcher_NoTimeout(t *testing.T) {
 
 	ba, err := newMultiBatcher(cfg,
 		request.NewItemsSizer(),
+		nil,
 		newWorkerPool(1),
 		NewPartitioner(func(ctx context.Context, _ request.Request) string {
 			return ctx.Value(partitionKey{}).(string)
@@ -86,6 +87,7 @@ func TestMultiBatcher_Timeout(t *testing.T) {
 
 	ba, err := newMultiBatcher(cfg,
 		request.NewItemsSizer(),
+		nil,
 		newWorkerPool(1),
 		NewPartitioner(func(ctx context.Context, _ request.Request) string {
 			return ctx.Value(partitionKey{}).(string)
@@ -135,6 +137,7 @@ func TestMultiBatcher_PartitionRemovedAfterIdleTimeout(t *testing.T) {
 
 	ba, err := newMultiBatcher(cfg,
 		request.NewItemsSizer(),
+		nil,
 		newWorkerPool(1),
 		NewPartitioner(func(ctx context.Context, _ request.Request) string {
 			return ctx.Value(partitionKey{}).(string)

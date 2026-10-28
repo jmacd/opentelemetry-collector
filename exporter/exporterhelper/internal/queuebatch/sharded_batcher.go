@@ -29,6 +29,7 @@ type shardedBatcher struct {
 func newShardedBatcher(
 	cfg BatchConfig,
 	sizer request.Sizer,
+	refCounter queue.ReferenceCounter[request.Request],
 	mergeCtx func(context.Context, context.Context) context.Context,
 	wp *workerPool,
 	next sender.SendFunc[request.Request],
@@ -43,7 +44,7 @@ func newShardedBatcher(
 		shards: make([]*partitionBatcher, 0, shardCount),
 	}
 	for range shardCount {
-		sb.shards = append(sb.shards, newPartitionBatcher(cfg, sizer, mergeCtx, wp, next, logger, nil))
+		sb.shards = append(sb.shards, newPartitionBatcher(cfg, sizer, refCounter, mergeCtx, wp, next, logger, nil))
 	}
 	return sb, nil
 }

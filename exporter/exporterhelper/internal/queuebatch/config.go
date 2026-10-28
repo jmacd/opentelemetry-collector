@@ -26,6 +26,7 @@ type Config struct {
 	Sizer request.SizerType `mapstructure:"sizer"`
 
 	// QueueSize represents the maximum data size allowed for concurrent storage and processing.
+	// With FastTrackOnOverflow, this limit applies only to the persistent lane.
 	QueueSize int64 `mapstructure:"queue_size"`
 
 	// BlockOnOverflow determines the behavior when the component's TotalSize limit is reached.
@@ -42,12 +43,16 @@ type Config struct {
 	// This applies across all different optional configurations from above (e.g. wait_for_result, block_on_overflow, storage, etc.).
 	NumConsumers int `mapstructure:"num_consumers"`
 
-	// FastTrack determines whether the component tries to export data directly before falling back to
-	// the queue. When a consumer slot is immediately available, the request is exported in-memory on
-	// the caller's goroutine, bypassing the persistent queue entirely. When all consumer slots are busy,
-	// the request is enqueued normally via the persistent queue.
-	// This option is only supported when a persistent queue is configured with storage.
+	// FastTrack enables a bounded in-memory lane for fresh requests, alternating with stored
+	// requests so current data can be exported while a backlog replays. The caller waits for
+	// export completion, including batching and retries. When the lane is full, requests
+	// fall back to storage. This option requires StorageID.
 	FastTrack bool `mapstructure:"fast_track"`
+
+	// FastTrackOnOverflow allows the in-memory lane to exceed QueueSize, so fresh requests
+	// can be exported even when the persistent queue is full. Requires FastTrack.
+	// The lane remains bounded by the number of queue consumers.
+	FastTrackOnOverflow bool `mapstructure:"fast_track_on_overflow"`
 
 	// BatchConfig it configures how the requests are consumed from the queue and batch together during consumption.
 	Batch configoptional.Optional[BatchConfig] `mapstructure:"batch"`
@@ -87,6 +92,9 @@ func (cfg *Config) Validate() error {
 
 	if cfg.FastTrack && cfg.StorageID == nil {
 		return errors.New("`fast_track` is only supported with a persistent queue configured with `storage`")
+	}
+	if cfg.FastTrackOnOverflow && !cfg.FastTrack {
+		return errors.New("`fast_track_on_overflow` requires `fast_track`")
 	}
 
 	if cfg.Batch.HasValue() && cfg.Batch.Get().Sizer == cfg.Sizer {

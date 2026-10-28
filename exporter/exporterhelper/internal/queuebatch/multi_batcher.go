@@ -19,6 +19,7 @@ type multiBatcher struct {
 	cfg         BatchConfig
 	wp          *workerPool
 	sizer       request.Sizer
+	refCounter  queue.ReferenceCounter[request.Request]
 	partitioner Partitioner[request.Request]
 	mergeCtx    func(context.Context, context.Context) context.Context
 	consumeFunc sender.SendFunc[request.Request]
@@ -30,6 +31,7 @@ type multiBatcher struct {
 func newMultiBatcher(
 	bCfg BatchConfig,
 	sizer request.Sizer,
+	refCounter queue.ReferenceCounter[request.Request],
 	wp *workerPool,
 	partitioner Partitioner[request.Request],
 	mergeCtx func(context.Context, context.Context) context.Context,
@@ -40,6 +42,7 @@ func newMultiBatcher(
 		cfg:         bCfg,
 		wp:          wp,
 		sizer:       sizer,
+		refCounter:  refCounter,
 		partitioner: partitioner,
 		mergeCtx:    mergeCtx,
 		consumeFunc: next,
@@ -72,7 +75,7 @@ func (mb *multiBatcher) getPartition(ctx context.Context, req request.Request) *
 	}
 
 	// Create new partition with onEmpty callback to remove from LRU after idle timeout
-	newPB := newPartitionBatcher(mb.cfg, mb.sizer, mb.mergeCtx, mb.wp, mb.consumeFunc, mb.logger, func() {
+	newPB := newPartitionBatcher(mb.cfg, mb.sizer, mb.refCounter, mb.mergeCtx, mb.wp, mb.consumeFunc, mb.logger, func() {
 		mb.lock.Lock()
 		defer mb.lock.Unlock()
 		mb.partitions.Remove(key)

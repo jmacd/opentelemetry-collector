@@ -59,6 +59,10 @@ func TestConfig_Validate(t *testing.T) {
 	cfg.FastTrack = true
 	cfg.StorageID = &storageID
 	require.NoError(t, confmap.Validate(cfg))
+	cfg.FastTrackOnOverflow = true
+	require.NoError(t, confmap.Validate(cfg))
+	cfg.FastTrack = false
+	require.EqualError(t, confmap.Validate(cfg), "`fast_track_on_overflow` requires `fast_track`")
 }
 
 func TestBatchConfig_Validate_MetadataKeys(t *testing.T) {

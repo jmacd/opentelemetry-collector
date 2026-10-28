@@ -81,6 +81,7 @@ type persistentQueue[T request.Request] struct {
 	storageID   component.ID
 	id          component.ID
 	signal      pipeline.Signal
+	refCounter  ReferenceCounter[T]
 
 	// mu guards everything declared below.
 	mu              sync.Mutex
@@ -92,33 +93,38 @@ type persistentQueue[T request.Request] struct {
 
 	blockOnOverflow bool
 
-	// fastTrack enables in-memory handoff to idle consumers, bypassing disk I/O.
-	fastTrack bool
-	// idleConsumers tracks how many consumer goroutines are waiting on hasMoreElements.
-	idleConsumers int
-	// fastTrackItems is an in-memory side-channel for fast-tracked requests.
-	fastTrackItems *linkedQueue[T]
+	// Slots remain reserved until completion, including requests held by the batcher.
+	// These counters are never persisted: metadata describes only recoverable requests.
+	fastTrackLimit      int
+	fastTrackCount      int
+	fastTrackSize       int64
+	fastTrackOnOverflow bool
+	fastTrackItems      *linkedQueue[T]
+	preferFastTrack     bool
 }
 
 // newPersistentQueue creates a new queue backed by file storage; name and signal must be a unique combination that identifies the queue storage
 func newPersistentQueue[T request.Request](set Settings[T]) readableQueue[T] {
 	pq := &persistentQueue[T]{
-		logger:          set.Telemetry.Logger,
-		encoding:        set.Encoding,
-		capacity:        set.Capacity,
-		sizerType:       set.SizerType,
-		activeSizer:     request.NewSizer(set.SizerType),
-		itemsSizer:      request.NewItemsSizer(),
-		bytesSizer:      request.NewBytesSizer(),
-		storageID:       *set.StorageID,
-		id:              set.ID,
-		signal:          set.Signal,
-		blockOnOverflow: set.BlockOnOverflow,
-		fastTrack:       set.FastTrack,
+		logger:              set.Telemetry.Logger,
+		encoding:            set.Encoding,
+		capacity:            set.Capacity,
+		sizerType:           set.SizerType,
+		activeSizer:         request.NewSizer(set.SizerType),
+		itemsSizer:          request.NewItemsSizer(),
+		bytesSizer:          request.NewBytesSizer(),
+		storageID:           *set.StorageID,
+		id:                  set.ID,
+		signal:              set.Signal,
+		blockOnOverflow:     set.BlockOnOverflow,
+		refCounter:          set.ReferenceCounter,
+		fastTrackOnOverflow: set.FastTrackOnOverflow,
+		preferFastTrack:     true,
 	}
 	pq.hasMoreElements = sync.NewCond(&pq.mu)
 	pq.hasMoreSpace = newCond(&pq.mu)
-	if pq.fastTrack {
+	if set.FastTrack {
+		pq.fastTrackLimit = set.NumConsumers
 		pq.fastTrackItems = &linkedQueue[T]{}
 	}
 	return pq
@@ -137,7 +143,7 @@ func (pq *persistentQueue[T]) Start(ctx context.Context, host component.Host) er
 func (pq *persistentQueue[T]) Size() int64 {
 	pq.mu.Lock()
 	defer pq.mu.Unlock()
-	return pq.internalSize()
+	return pq.internalSize() + pq.fastTrackSize
 }
 
 func (pq *persistentQueue[T]) internalSize() int64 {
@@ -261,9 +267,10 @@ func (pq *persistentQueue[T]) Shutdown(ctx context.Context) error {
 
 	pq.mu.Lock()
 	defer pq.mu.Unlock()
-	// Mark this queue as stopped, so consumer don't start any more work.
+	// Leave stored requests for restart, but drain unpersisted fast-track requests.
 	pq.stopped = true
 	pq.hasMoreElements.Broadcast()
+	pq.hasMoreSpace.Broadcast()
 	return pq.unrefClient(ctx)
 }
 
@@ -282,50 +289,58 @@ func (pq *persistentQueue[T]) unrefClient(ctx context.Context) error {
 // It returns ErrQueueIsFull if no space is currently available.
 func (pq *persistentQueue[T]) Offer(ctx context.Context, req T) error {
 	pq.mu.Lock()
+	done, err := pq.offer(ctx, req)
+	pq.mu.Unlock()
+	if err != nil || done == nil {
+		return err
+	}
+	// A handoff is not an acknowledgment. Wait for export (including batching and
+	// retries) even if the caller cancels; the consumer reports its actual result.
+	return <-done.ch
+}
 
+// offer requires pq.mu to be held.
+func (pq *persistentQueue[T]) offer(ctx context.Context, req T) (*fastTrackDone, error) {
 	size := pq.activeSizer.Sizeof(req)
-	for pq.internalSize()+size > pq.capacity {
+	for {
+		if pq.stopped {
+			return nil, experr.NewShutdownErr(errors.New("queue is stopped"))
+		}
+
+		fits := pq.internalSize()+pq.fastTrackSize+size <= pq.capacity
+		if pq.fastTrackCount < pq.fastTrackLimit && (fits || pq.fastTrackOnOverflow) {
+			done := &fastTrackDone{ch: make(chan error, 1), size: size, queue: pq}
+			// asyncQueue releases this reference after consuming the request.
+			if pq.refCounter != nil {
+				pq.refCounter.Ref(req)
+			}
+			pq.fastTrackCount++
+			pq.fastTrackSize += size
+			pq.fastTrackItems.push(ctx, req, done)
+			pq.hasMoreElements.Signal()
+			return done, nil
+		}
+
+		if fits || (pq.fastTrackOnOverflow && pq.internalSize()+size <= pq.capacity) {
+			pq.metadata.ItemsSize += pq.itemsSizer.Sizeof(req)
+			pq.metadata.BytesSize += pq.bytesSizer.Sizeof(req)
+			return nil, pq.putInternal(ctx, req)
+		}
 		if !pq.blockOnOverflow {
-			pq.mu.Unlock()
-			return ErrQueueIsFull
+			return nil, ErrQueueIsFull
 		}
 		if err := pq.hasMoreSpace.Wait(ctx); err != nil {
-			pq.mu.Unlock()
-			return err
+			return nil, err
 		}
 	}
+}
 
-	itemsSize := pq.itemsSizer.Sizeof(req)
-	bytesSize := pq.bytesSizer.Sizeof(req)
-	pq.metadata.ItemsSize += itemsSize
-	pq.metadata.BytesSize += bytesSize
-
-	// Fast track: if a consumer is idle, hand off in-memory to skip disk I/O.
-	if pq.fastTrack && pq.idleConsumers > 0 {
-		done := newFastTrackDone()
-		pq.fastTrackItems.push(ctx, req, done)
-		pq.hasMoreElements.Signal()
-		pq.mu.Unlock()
-		// Block until consumer finishes (wait-for-result semantics for durability).
-		// issue: https://github.com/open-telemetry/opentelemetry-collector/issues/13355
-		doneErr := <-done.ch
-		pq.mu.Lock()
-		pq.metadata.BytesSize -= bytesSize
-		if pq.metadata.BytesSize < 0 {
-			pq.metadata.BytesSize = 0
-		}
-		pq.metadata.ItemsSize -= itemsSize
-		if pq.metadata.ItemsSize < 0 {
-			pq.metadata.ItemsSize = 0
-		}
-		pq.hasMoreSpace.Signal()
-		pq.mu.Unlock()
-		return doneErr
-	}
-
-	err := pq.putInternal(ctx, req)
-	pq.mu.Unlock()
-	return err
+func (pq *persistentQueue[T]) onFastTrackDone(size int64) {
+	pq.mu.Lock()
+	defer pq.mu.Unlock()
+	pq.fastTrackCount--
+	pq.fastTrackSize -= size
+	pq.hasMoreSpace.Signal()
 }
 
 // putInternal adds the request to the storage without updating items/bytes sizes.
@@ -362,15 +377,18 @@ func (pq *persistentQueue[T]) Read(ctx context.Context) (context.Context, T, Don
 	defer pq.mu.Unlock()
 
 	for {
+		// Alternate lanes when both have work. During shutdown only the in-memory
+		// lane must drain; stored requests can be recovered on restart.
+		if pq.fastTrackItems != nil && pq.fastTrackItems.hasElements() &&
+			(pq.preferFastTrack || pq.stopped || pq.metadata.ReadIndex == pq.metadata.WriteIndex) {
+			pq.preferFastTrack = false
+			reqCtx, req, done := pq.fastTrackItems.pop()
+			return reqCtx, req, done, true
+		}
+
 		if pq.stopped {
 			var req T
 			return context.Background(), req, nil, false
-		}
-
-		// just check the fast-track items first
-		if pq.fastTrackItems != nil && pq.fastTrackItems.hasElements() {
-			reqCtx, req, done := pq.fastTrackItems.pop()
-			return reqCtx, req, done, true
 		}
 
 		// Read until either a successful retrieved element or no more elements in the storage.
@@ -382,6 +400,7 @@ func (pq *persistentQueue[T]) Read(ctx context.Context) (context.Context, T, Don
 				pq.metadata.ItemsSize = 0
 			}
 			if consumed {
+				pq.preferFastTrack = true
 				id := indexDonePool.Get().(*indexDone)
 				id.reset(index, pq.itemsSizer.Sizeof(req), pq.bytesSizer.Sizeof(req), pq)
 				return reqCtx, req, id, true
@@ -389,12 +408,15 @@ func (pq *persistentQueue[T]) Read(ctx context.Context) (context.Context, T, Don
 			// More space available, data was dropped.
 			pq.hasMoreSpace.Signal()
 		}
+		// Storage failures may have drained the persistent lane without returning
+		// a request. Recheck the in-memory lane before waiting for a new offer.
+		if pq.fastTrackItems != nil && pq.fastTrackItems.hasElements() {
+			continue
+		}
 
 		// TODO: Need to change the Queue interface to return an error to allow distinguish between shutdown and context canceled.
 		//  Until then use the sync.Cond.
-		pq.idleConsumers++
 		pq.hasMoreElements.Wait()
-		pq.idleConsumers--
 	}
 }
 
@@ -673,18 +695,15 @@ func (id *indexDone) OnDone(err error) {
 	id.queue.onDone(id.index, id.itemsSize, id.bytesSize, err)
 }
 
-// fastTrackDone is the Done callback for fast-tracked requests that bypassed disk I/O.
-// issue: https://github.com/open-telemetry/opentelemetry-collector/issues/13355
 type fastTrackDone struct {
-	ch chan error
-}
-
-func newFastTrackDone() *fastTrackDone {
-	return &fastTrackDone{
-		ch: make(chan error, 1),
+	ch    chan error
+	size  int64
+	queue interface {
+		onFastTrackDone(int64)
 	}
 }
 
 func (fd *fastTrackDone) OnDone(err error) {
+	fd.queue.onFastTrackDone(fd.size)
 	fd.ch <- err
 }

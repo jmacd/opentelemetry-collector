@@ -7,9 +7,11 @@ import (
 	"context"
 	"errors"
 	"runtime"
+	"strconv"
 	"sync"
 	"sync/atomic"
 	"testing"
+	"testing/synctest"
 	"time"
 
 	"github.com/stretchr/testify/assert"
@@ -26,6 +28,9 @@ import (
 	"go.opentelemetry.io/collector/exporter/exporterhelper/internal/sendertest"
 	"go.opentelemetry.io/collector/exporter/exporterhelper/internal/storagetest"
 	"go.opentelemetry.io/collector/exporter/exportertest"
+	"go.opentelemetry.io/collector/featuregate"
+	"go.opentelemetry.io/collector/pdata/plog"
+	"go.opentelemetry.io/collector/pdata/xpdata/pref"
 	"go.opentelemetry.io/collector/pipeline"
 )
 
@@ -599,48 +604,207 @@ func TestQueueBatchTimerFlush(t *testing.T) {
 	require.NoError(t, qb.Shutdown(context.Background()))
 }
 
-func TestQueueBatch_FastTrack_BatchingPreserved(t *testing.T) {
-	sink := requesttest.NewSink()
-	storageID := component.MustNewIDWithName("file_storage", "storage")
-	cfg := newTestConfig()
-	cfg.StorageID = &storageID
-	cfg.FastTrack = true
-	cfg.NumConsumers = 2
-	// Enable batching with MinSize of 2 items — requests should be merged before export.
-	cfg.Batch = configoptional.Some(BatchConfig{
-		FlushTimeout: 200 * time.Millisecond,
-		Sizer:        request.SizerTypeItems,
-		MinSize:      2,
-	})
+type fastTrackLogsEncoding struct {
+	logsEncoding
+	marshaled atomic.Int64
+}
 
-	qSet := newFakeRequestSettings()
-	qSet.Encoding = newFakeEncoding(&requesttest.FakeRequest{Items: 1})
-	qb, err := NewQueueBatch(qSet, cfg, sink.Export)
-	require.NoError(t, err)
+func (e *fastTrackLogsEncoding) Marshal(ctx context.Context, req request.Request) ([]byte, error) {
+	e.marshaled.Add(1)
+	return e.logsEncoding.Marshal(ctx, req)
+}
 
-	host := hosttest.NewHost(map[component.ID]component.Component{
-		storageID: storagetest.NewMockStorageExtension(nil),
-	})
-	require.NoError(t, qb.Start(context.Background(), host))
-
-	// Send 4 individual 1-item requests concurrently. With batching (MinSize=2),
-	// they should be merged before export. Fast-track blocks the caller so we
-	// need concurrent goroutines for batching to merge them.
-	wg := sync.WaitGroup{}
-	for range 4 {
-		wg.Go(func() {
-			assert.NoError(t, qb.Send(context.Background(), &requesttest.FakeRequest{Items: 1}))
+func TestQueueBatch_FastTrack_Pdata(t *testing.T) {
+	enableProtoPooling(t)
+	for _, batch := range []bool{false, true} {
+		t.Run(strconv.FormatBool(batch), func(t *testing.T) {
+			synctest.Test(t, func(t *testing.T) {
+				storageID := component.MustNewID("file_storage")
+				cfg := newTestConfig()
+				cfg.StorageID = &storageID
+				cfg.FastTrack = true
+				cfg.NumConsumers = 2
+				cfg.Batch = configoptional.None[BatchConfig]()
+				if batch {
+					cfg.Batch = configoptional.Some(BatchConfig{
+						FlushTimeout: time.Hour,
+						Sizer:        request.SizerTypeItems,
+						MinSize:      1,
+						MaxSize:      2,
+					})
+				}
+				set := newFakeRequestSettings()
+				set.Settings = NewLogsQueueBatchSettings()
+				enc := &fastTrackLogsEncoding{}
+				set.Encoding = enc
+				exported := make(chan []string, 2)
+				release := make(chan struct{})
+				exportErr := errors.New("backend unavailable")
+				qb, err := NewQueueBatch(set, cfg, func(_ context.Context, req request.Request) error {
+					records := req.(*logsRequest).ld.ResourceLogs().At(0).ScopeLogs().At(0).LogRecords()
+					var ids []string
+					for i := 0; i < records.Len(); i++ {
+						ids = append(ids, records.At(i).Body().Str())
+					}
+					exported <- ids
+					<-release
+					return exportErr
+				})
+				require.NoError(t, err)
+				require.NoError(t, qb.Start(t.Context(), hosttest.NewHost(map[component.ID]component.Component{
+					storageID: storagetest.NewMockStorageExtension(nil),
+				})))
+				ld := plog.NewLogs()
+				require.True(t, pref.MarkPipelineOwnedLogs(ld))
+				records := ld.ResourceLogs().AppendEmpty().ScopeLogs().AppendEmpty().LogRecords()
+				for i := range 3 {
+					records.AppendEmpty().Body().SetStr(strconv.Itoa(i))
+				}
+				ctx, cancel := context.WithCancel(t.Context())
+				result := make(chan error, 1)
+				go func() { result <- qb.Send(ctx, newLogsRequest(ld)) }()
+				synctest.Wait()
+				cancel()
+				synctest.Wait()
+				assert.Empty(t, result, "cancellation must not report completion while export is still running")
+				assert.Equal(t, int64(3), qb.queue.Size())
+				var ids []string
+				for len(exported) > 0 {
+					ids = append(ids, (<-exported)...)
+				}
+				assert.ElementsMatch(t, []string{"0", "1", "2"}, ids)
+				assert.Zero(t, enc.marshaled.Load(), "the request must actually take the fast-track path")
+				close(release)
+				require.ErrorIs(t, <-result, exportErr)
+				require.NoError(t, qb.Shutdown(t.Context()))
+				if !batch {
+					assert.Equal(t, 3, ld.LogRecordCount(), "the caller still owns its data")
+				}
+				require.NotPanics(t, func() { pref.UnrefLogs(ld) })
+			})
 		})
 	}
-	wg.Wait()
+}
 
-	assert.EventuallyWithT(t, func(c *assert.CollectT) {
-		assert.Equal(c, 4, sink.ItemsCount())
-		// With MinSize=2 and 4 items sent concurrently, expect at most 2 batched requests.
-		assert.LessOrEqual(c, sink.RequestsCount(), 2)
-	}, 1*time.Second, 10*time.Millisecond)
+func enableProtoPooling(t *testing.T) {
+	t.Helper()
+	featuregate.GlobalRegistry().VisitAll(func(gate *featuregate.Gate) {
+		if gate.ID() == "pdata.useProtoPooling" {
+			previous := gate.IsEnabled()
+			require.NoError(t, featuregate.GlobalRegistry().Set(gate.ID(), true))
+			t.Cleanup(func() { require.NoError(t, featuregate.GlobalRegistry().Set(gate.ID(), previous)) })
+		}
+	})
+}
 
-	require.NoError(t, qb.Shutdown(context.Background()))
+func TestQueueBatch_FastTrack_MixedBatchOwnership(t *testing.T) {
+	enableProtoPooling(t)
+	for _, partitioned := range []bool{false, true} {
+		t.Run(strconv.FormatBool(partitioned), func(t *testing.T) {
+			synctest.Test(t, func(t *testing.T) {
+				storageID := component.MustNewID("file_storage")
+				cfg := newTestConfig()
+				cfg.StorageID = &storageID
+				cfg.FastTrack = true
+				cfg.NumConsumers = 1
+				cfg.Batch = configoptional.Some(BatchConfig{
+					FlushTimeout: time.Hour,
+					Sizer:        request.SizerTypeItems,
+					MinSize:      2,
+					MaxSize:      2,
+				})
+				set := newFakeRequestSettings()
+				set.Settings = NewLogsQueueBatchSettings()
+				if partitioned {
+					set.Partitioner = NewMetadataKeysPartitioner([]string{"tenant"})
+				}
+				enc := &fastTrackLogsEncoding{}
+				set.Encoding = enc
+				exported := make(chan []string, 2)
+				qb, err := NewQueueBatch(set, cfg, func(_ context.Context, req request.Request) error {
+					var ids []string
+					for _, rl := range req.(*logsRequest).ld.ResourceLogs().All() {
+						for _, sl := range rl.ScopeLogs().All() {
+							for _, record := range sl.LogRecords().All() {
+								ids = append(ids, record.Body().Str())
+							}
+						}
+					}
+					exported <- ids
+					return nil
+				})
+				require.NoError(t, err)
+				require.NoError(t, qb.Start(t.Context(), hosttest.NewHost(map[component.ID]component.Component{
+					storageID: storagetest.NewMockStorageExtension(nil),
+				})))
+				fresh := plog.NewLogs()
+				fresh.ResourceLogs().AppendEmpty().ScopeLogs().AppendEmpty().LogRecords().AppendEmpty().Body().SetStr("fresh")
+				result := make(chan error, 1)
+				go func() {
+					err := qb.Send(t.Context(), newLogsRequest(fresh))
+					pref.UnrefLogs(fresh)
+					result <- err
+				}()
+				synctest.Wait()
+				assert.Empty(t, result)
+
+				stored := plog.NewLogs()
+				records := stored.ResourceLogs().AppendEmpty().ScopeLogs().AppendEmpty().LogRecords()
+				records.AppendEmpty().Body().SetStr("stored-1")
+				records.AppendEmpty().Body().SetStr("stored-2")
+				require.NoError(t, qb.Send(t.Context(), newLogsRequest(stored)))
+				pref.UnrefLogs(stored)
+				synctest.Wait()
+				require.Len(t, result, 1, "fresh completion must not wait for an unrelated remainder")
+				require.NoError(t, <-result)
+				assert.Equal(t, int64(1), enc.marshaled.Load())
+				ids := <-exported
+				assert.ElementsMatch(t, []string{"fresh", "stored-1"}, ids)
+				require.NoError(t, qb.Shutdown(t.Context()))
+				ids = append(ids, (<-exported)...)
+				assert.ElementsMatch(t, []string{"fresh", "stored-1", "stored-2"}, ids)
+			})
+		})
+	}
+}
+
+func TestQueueBatch_FastTrack_BatchingPreserved(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		sink := requesttest.NewSink()
+		storageID := component.MustNewID("file_storage")
+		cfg := newTestConfig()
+		cfg.StorageID = &storageID
+		cfg.FastTrack = true
+		cfg.Batch = configoptional.Some(BatchConfig{
+			FlushTimeout: time.Hour,
+			Sizer:        request.SizerTypeItems,
+			MinSize:      2,
+		})
+		set := newFakeRequestSettings()
+		set.Encoding = newFakeEncoding(&requesttest.FakeRequest{Items: 1})
+		qb, err := NewQueueBatch(set, cfg, sink.Export)
+		require.NoError(t, err)
+		require.NoError(t, qb.Start(t.Context(), hosttest.NewHost(map[component.ID]component.Component{
+			storageID: storagetest.NewMockStorageExtension(nil),
+		})))
+		result := make(chan error, 1)
+		go func() { result <- qb.Send(t.Context(), &requesttest.FakeRequest{Items: 1}) }()
+		synctest.Wait()
+		assert.Empty(t, result, "the first request must be fast-tracked and waiting for a batch")
+		assert.Zero(t, sink.RequestsCount())
+		require.NoError(t, qb.Send(t.Context(), &requesttest.FakeRequest{Items: 1}))
+		require.NoError(t, <-result)
+		assert.Equal(t, 1, sink.RequestsCount())
+		assert.Equal(t, 2, sink.ItemsCount())
+
+		go func() { result <- qb.Send(t.Context(), &requesttest.FakeRequest{Items: 1}) }()
+		synctest.Wait()
+		assert.Empty(t, result)
+		require.NoError(t, qb.Shutdown(t.Context()))
+		require.NoError(t, <-result)
+		assert.Equal(t, 2, sink.RequestsCount())
+		assert.Equal(t, 3, sink.ItemsCount(), "shutdown must flush a partial fast-track batch")
+	})
 }
 
 func newTestConfig() Config {

@@ -16,6 +16,7 @@ import (
 	"go.uber.org/zap"
 	"go.uber.org/zap/zaptest/observer"
 
+	"go.opentelemetry.io/collector/client"
 	"go.opentelemetry.io/collector/component/componenttest"
 	"go.opentelemetry.io/collector/exporter/exporterhelper/internal/request"
 	"go.opentelemetry.io/collector/exporter/exporterhelper/internal/requesttest"
@@ -66,7 +67,7 @@ func TestPartitionBatcher_NoSplit_MinThresholdZero_TimeoutDisabled(t *testing.T)
 			}
 
 			sink := requesttest.NewSink()
-			ba := newPartitionBatcher(cfg, tt.sizer, nil, newWorkerPool(tt.maxWorkers), sink.Export, zap.NewNop(), nil)
+			ba := newPartitionBatcher(cfg, tt.sizer, nil, nil, newWorkerPool(tt.maxWorkers), sink.Export, zap.NewNop(), nil)
 			require.NoError(t, ba.Start(context.Background(), componenttest.NewNopHost()))
 			t.Cleanup(func() {
 				require.NoError(t, ba.Shutdown(context.Background()))
@@ -130,7 +131,7 @@ func TestPartitionBatcher_NoSplit_TimeoutDisabled(t *testing.T) {
 			}
 
 			sink := requesttest.NewSink()
-			ba := newPartitionBatcher(cfg, tt.sizer, nil, newWorkerPool(tt.maxWorkers), sink.Export, zap.NewNop(), nil)
+			ba := newPartitionBatcher(cfg, tt.sizer, nil, nil, newWorkerPool(tt.maxWorkers), sink.Export, zap.NewNop(), nil)
 			require.NoError(t, ba.Start(context.Background(), componenttest.NewNopHost()))
 
 			done := newFakeDone()
@@ -211,7 +212,7 @@ func TestPartitionBatcher_NoSplit_WithTimeout(t *testing.T) {
 			}
 
 			sink := requesttest.NewSink()
-			ba := newPartitionBatcher(cfg, tt.sizer, nil, newWorkerPool(tt.maxWorkers), sink.Export, zap.NewNop(), nil)
+			ba := newPartitionBatcher(cfg, tt.sizer, nil, nil, newWorkerPool(tt.maxWorkers), sink.Export, zap.NewNop(), nil)
 			require.NoError(t, ba.Start(context.Background(), componenttest.NewNopHost()))
 			t.Cleanup(func() {
 				require.NoError(t, ba.Shutdown(context.Background()))
@@ -283,7 +284,7 @@ func TestPartitionBatcher_Split_TimeoutDisabled(t *testing.T) {
 			}
 
 			sink := requesttest.NewSink()
-			ba := newPartitionBatcher(cfg, tt.sizer, nil, newWorkerPool(tt.maxWorkers), sink.Export, zap.NewNop(), nil)
+			ba := newPartitionBatcher(cfg, tt.sizer, nil, nil, newWorkerPool(tt.maxWorkers), sink.Export, zap.NewNop(), nil)
 			require.NoError(t, ba.Start(context.Background(), componenttest.NewNopHost()))
 
 			done := newFakeDone()
@@ -331,7 +332,7 @@ func TestPartitionBatcher_Shutdown(t *testing.T) {
 	}
 
 	sink := requesttest.NewSink()
-	ba := newPartitionBatcher(cfg, request.NewItemsSizer(), nil, newWorkerPool(2), sink.Export, zap.NewNop(), nil)
+	ba := newPartitionBatcher(cfg, request.NewItemsSizer(), nil, nil, newWorkerPool(2), sink.Export, zap.NewNop(), nil)
 	require.NoError(t, ba.Start(context.Background(), componenttest.NewNopHost()))
 
 	done := newFakeDone()
@@ -360,7 +361,7 @@ func TestPartitionBatcher_MergeError(t *testing.T) {
 	}
 
 	sink := requesttest.NewSink()
-	ba := newPartitionBatcher(cfg, request.NewItemsSizer(), nil, newWorkerPool(2), sink.Export, zap.NewNop(), nil)
+	ba := newPartitionBatcher(cfg, request.NewItemsSizer(), nil, nil, newWorkerPool(2), sink.Export, zap.NewNop(), nil)
 	require.NoError(t, ba.Start(context.Background(), componenttest.NewNopHost()))
 	t.Cleanup(func() {
 		require.NoError(t, ba.Shutdown(context.Background()))
@@ -394,7 +395,7 @@ func TestPartitionBatcher_PartialSuccessError(t *testing.T) {
 	core, observed := observer.New(zap.WarnLevel)
 	logger := zap.New(core)
 	sink := requesttest.NewSink()
-	ba := newPartitionBatcher(cfg, request.NewItemsSizer(), nil, newWorkerPool(1), sink.Export, logger, nil)
+	ba := newPartitionBatcher(cfg, request.NewItemsSizer(), nil, nil, newWorkerPool(1), sink.Export, logger, nil)
 	require.NoError(t, ba.Start(context.Background(), componenttest.NewNopHost()))
 
 	done := newFakeDone()
@@ -436,7 +437,7 @@ func TestSPartitionBatcher_PartialSuccessError_AfterOkRequest(t *testing.T) {
 	core, observed := observer.New(zap.WarnLevel)
 	logger := zap.New(core)
 	sink := requesttest.NewSink()
-	ba := newPartitionBatcher(cfg, request.NewItemsSizer(), nil, newWorkerPool(1), sink.Export, logger, nil)
+	ba := newPartitionBatcher(cfg, request.NewItemsSizer(), nil, nil, newWorkerPool(1), sink.Export, logger, nil)
 	require.NoError(t, ba.Start(context.Background(), componenttest.NewNopHost()))
 
 	done := newFakeDone()
@@ -496,7 +497,7 @@ func TestShardBatcher_EmptyRequestList(t *testing.T) {
 	}
 
 	sink := requesttest.NewSink()
-	ba := newPartitionBatcher(cfg, request.NewItemsSizer(), nil, newWorkerPool(1), sink.Export, zap.NewNop(), nil)
+	ba := newPartitionBatcher(cfg, request.NewItemsSizer(), nil, nil, newWorkerPool(1), sink.Export, zap.NewNop(), nil)
 	require.NoError(t, ba.Start(context.Background(), componenttest.NewNopHost()))
 	t.Cleanup(func() {
 		require.NoError(t, ba.Shutdown(context.Background()))
@@ -520,12 +521,20 @@ func TestPartitionBatcher_ContextMerging(t *testing.T) {
 	tests := []struct {
 		name         string
 		mergeCtxFunc func(ctx1, ctx2 context.Context) context.Context
+		timestamp    any
+		canceled     bool
+		tenant       []string
+		other        []string
 	}{
 		{
 			name: "merge_context_with_timestamp",
 			mergeCtxFunc: func(ctx1, _ context.Context) context.Context {
 				return context.WithValue(ctx1, timestampKey, 1234)
 			},
+			timestamp: 1234,
+			canceled:  true,
+			tenant:    []string{"a"},
+			other:     []string{"b"},
 		},
 		{
 			name: "merge_context_returns_background",
@@ -537,6 +546,11 @@ func TestPartitionBatcher_ContextMerging(t *testing.T) {
 			name:         "nil_merge_context",
 			mergeCtxFunc: nil,
 		},
+		{
+			name:         "selected_metadata_only",
+			mergeCtxFunc: NewMetadataKeysMergeCtx([]string{"tenant"}),
+			tenant:       []string{"a"},
+		},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -545,15 +559,32 @@ func TestPartitionBatcher_ContextMerging(t *testing.T) {
 				Sizer:        request.SizerTypeItems,
 				MinSize:      10,
 			}
-			sink := requesttest.NewSink()
-			ba := newPartitionBatcher(cfg, request.NewItemsSizer(), tt.mergeCtxFunc, newWorkerPool(1), sink.Export, zap.NewNop(), nil)
-			require.NoError(t, ba.Start(context.Background(), componenttest.NewNopHost()))
+			exported := make(chan context.Context, 1)
+			ba := newPartitionBatcher(cfg, request.NewItemsSizer(), nil, tt.mergeCtxFunc, newWorkerPool(1),
+				func(ctx context.Context, _ request.Request) error {
+					exported <- ctx
+					return nil
+				}, zap.NewNop(), nil)
+			require.NoError(t, ba.Start(t.Context(), componenttest.NewNopHost()))
+			ctx := client.NewContext(context.WithValue(t.Context(), timestampKey, 42), client.Info{
+				Metadata: client.NewMetadata(map[string][]string{"tenant": {"a"}, "other": {"b"}}),
+			})
+			ctx, cancel := context.WithCancel(ctx)
+			cancel()
 
 			done := newFakeDone()
-			ba.Consume(context.Background(), &requesttest.FakeRequest{Items: 8, Bytes: 8}, done)
-			ba.Consume(context.Background(), &requesttest.FakeRequest{Items: 8, Bytes: 8}, done)
-			<-time.After(10 * time.Millisecond)
-			assert.Equal(t, 1, sink.RequestsCount())
+			ba.Consume(ctx, &requesttest.FakeRequest{Items: 8, Bytes: 8}, done)
+			ba.Consume(t.Context(), &requesttest.FakeRequest{Items: 8, Bytes: 8}, done)
+			merged := <-exported
+			assert.Equal(t, tt.timestamp, merged.Value(timestampKey))
+			if tt.canceled {
+				require.ErrorIs(t, merged.Err(), context.Canceled)
+			} else {
+				require.NoError(t, merged.Err())
+			}
+			assert.Equal(t, tt.tenant, client.FromContext(merged).Metadata.Get("tenant"))
+			assert.Equal(t, tt.other, client.FromContext(merged).Metadata.Get("other"))
+			require.NoError(t, ba.Shutdown(t.Context()))
 			assert.EqualValues(t, 2, done.success.Load())
 		})
 	}
@@ -573,7 +604,7 @@ func TestPartitionBatcher_OnEmptyCallbackTriggered(t *testing.T) {
 		onEmptyCalled.Add(1)
 	}
 
-	ba := newPartitionBatcher(cfg, request.NewItemsSizer(), nil, newWorkerPool(1), sink.Export, zap.NewNop(), onEmpty)
+	ba := newPartitionBatcher(cfg, request.NewItemsSizer(), nil, nil, newWorkerPool(1), sink.Export, zap.NewNop(), onEmpty)
 	require.NoError(t, ba.Start(context.Background(), componenttest.NewNopHost()))
 	t.Cleanup(func() {
 		require.NoError(t, ba.Shutdown(context.Background()))
@@ -609,7 +640,7 @@ func TestPartitionBatcher_OnEmptyNotCalledWithActiveData(t *testing.T) {
 		onEmptyCalled.Add(1)
 	}
 
-	ba := newPartitionBatcher(cfg, request.NewItemsSizer(), nil, newWorkerPool(1), sink.Export, zap.NewNop(), onEmpty)
+	ba := newPartitionBatcher(cfg, request.NewItemsSizer(), nil, nil, newWorkerPool(1), sink.Export, zap.NewNop(), onEmpty)
 	require.NoError(t, ba.Start(context.Background(), componenttest.NewNopHost()))
 	t.Cleanup(func() {
 		require.NoError(t, ba.Shutdown(context.Background()))

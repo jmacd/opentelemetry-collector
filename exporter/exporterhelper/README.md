@@ -81,12 +81,44 @@ To use the persistent queue, the following setting needs to be set:
 
 - `sending_queue`
   - `storage` (default = none): When set, enables persistence and uses the component specified as a storage extension for the persistent queue.
-    There is no in-memory queue when set.
+    Requests are persisted unless `fast_track` is enabled.
+  - `fast_track` (default = false): Enables a bounded in-memory lane for fresh requests.
+    Consumers alternate between fresh and stored requests when both lanes have work,
+    allowing current observability data to be exported while a backlog replays.
+    Requires `storage`.
+  - `fast_track_on_overflow` (default = false): Allows the fresh-data lane to accept requests
+    even when the persistent queue has reached `queue_size`. Requires `fast_track`.
 
 The maximum number of batches stored to disk can be controlled using `sending_queue.queue_size` parameter (which,
 similarly as for in-memory buffering, defaults to 1000 batches).
 
 When persistent queue is enabled, the batches are being buffered using the provided storage extension - [filestorage] is a popular and safe choice. If the collector instance is killed while having some items in the persistent queue, on restart the items will be picked and the exporting is continued.
+
+With `fast_track`, at most one fresh request per queue consumer can be outstanding, including
+requests awaiting batching or export completion. Without batch partitioning, enabling batching
+reduces the number of queue consumers (and fresh-data slots) to one. When those slots are occupied,
+new requests fall back to storage. Dispatch alternates between lanes; it does not interrupt an
+export or retry already in progress, and does not guarantee completion order.
+
+By default, `queue_size` limits the combined size of both lanes. With `fast_track_on_overflow`,
+it limits only the persistent lane; the separately bounded fresh-data lane can exceed that limit.
+The queue-size metric includes both lanes and can therefore exceed the queue-capacity metric.
+The fresh-data bound counts requests, not bytes. If neither lane can accept a request,
+`block_on_overflow` determines whether to wait for capacity or return an error.
+
+A fast-track caller waits for export completion, including batching and retries, and receives the
+export result. A stored request is acknowledged once persisted. Consequently, acknowledgment latency
+and error propagation depend on the chosen lane. The original context, including cancellation,
+reaches the batcher or exporter on the fast-track path. Merging requests into a batch can replace
+that context: the default merge drops cancellation and arbitrary values, including authentication
+information; metadata partitioning preserves only the configured metadata keys. Cancellation alone
+does not acknowledge or discard a fast-track request; its caller still waits for the export result.
+Shutdown drains accepted fast-track work, including partial batches, while
+stored work can remain for restart.
+
+Fast-track requests are not recoverable from local storage after a crash. Avoiding loss requires
+the upstream sender to retain unacknowledged data and retry failures. The additional context
+restrictions below apply to the stored path.
 
 **Context Propagation**: Request context (including client metadata and span context) is preserved when using persistent queues. However, context set by Auth extensions is **not** propagated through the persistent queue. Auth extension context is ignored when data is persisted to disk, which means authentication/authorization information will not be available when the persisted data is processed.
 
