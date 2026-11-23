@@ -5,16 +5,12 @@
 package {{ .Package }}
 
 import (
-	{{- if .Status.Deprecation }}
-	"slices"
-
-	{{ end -}}
 	"go.opentelemetry.io/collector/component"
 	{{- if and isExporter (not .SendingQueue.IsOmitted) }}
 	"go.opentelemetry.io/collector/config/configoptional"
 	"go.opentelemetry.io/collector/exporter/exporterhelper"
 	{{- end }}
-	{{- if .Status.Deprecation }}
+	{{- if and .Status.Deprecation (not isExtension) }}
 	"go.opentelemetry.io/collector/pipeline"
 	{{- if .Status.Deprecation.UsesProfiles }}
 	"go.opentelemetry.io/collector/pipeline/xpipeline"
@@ -42,16 +38,32 @@ const (
 // DeprecationNotes can be embedded in the factory to include migration guidance in the startup log.
 type DeprecationNotes struct{}
 
-func (DeprecationNotes) DeprecationMessage(signals ...pipeline.Signal) string {
+{{ if isExtension -}}
+func (DeprecationNotes) DeprecationMessage() string {
+	return {{ printf "%q" (trimRight (index .Status.Deprecation "extension").Migration "\r\n") }}
+}
+{{ else if isConnector -}}
+func (DeprecationNotes) DeprecationMessage(from, to pipeline.Signal) string {
 	switch {
 	{{- range $key, $info := .Status.Deprecation }}
-	{{- $signals := deprecationSignalRefs $key }}
-	case slices.Equal(signals, []pipeline.Signal{ {{- stringsJoin $signals ", " -}} }):
+	{{- $signals := stringsSplit $key "_to_" }}
+	case from == {{ signalRef (index $signals 0) }} && to == {{ signalRef (index $signals 1) }}:
 		return {{ printf "%q" (trimRight $info.Migration "\r\n") }}
 	{{- end }}
 	}
 	return ""
 }
+{{ else -}}
+func (DeprecationNotes) DeprecationMessage(signal pipeline.Signal) string {
+	switch signal {
+	{{- range $key, $info := .Status.Deprecation }}
+	case {{ signalRef $key }}:
+		return {{ printf "%q" (trimRight $info.Migration "\r\n") }}
+	{{- end }}
+	}
+	return ""
+}
+{{ end -}}
 {{ end -}}
 
 {{ if and isExporter (not .SendingQueue.IsOmitted) -}}

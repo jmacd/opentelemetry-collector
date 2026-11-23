@@ -483,10 +483,10 @@ func getTemplateFuncMap(md Metadata, importRootPath string) template.FuncMap {
 			}
 			return false
 		},
-		"deprecationSignalRefs": deprecationSignalRefs,
-		"stringsJoin":           strings.Join,
-		"stringsSplit":          strings.Split,
-		"trimRight":             strings.TrimRight,
+		"signalRef":    signalRef,
+		"stringsJoin":  strings.Join,
+		"stringsSplit": strings.Split,
+		"trimRight":    strings.TrimRight,
 		"userLinks": func(elems []string) []string {
 			result := make([]string, len(elems))
 			for i, elem := range elems {

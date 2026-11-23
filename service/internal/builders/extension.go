@@ -19,6 +19,10 @@ type Extension interface {
 	Factory(component.Type) component.Factory
 }
 
+type extensionDeprecationMessageProvider interface {
+	DeprecationMessage() string
+}
+
 // ExtensionBuilder is a helper struct that given a set of Configs and Factories helps with creating extensions.
 type ExtensionBuilder struct {
 	cfgs      map[component.ID]component.Config
@@ -44,7 +48,12 @@ func (b *ExtensionBuilder) Create(ctx context.Context, set extension.Settings) (
 	}
 
 	logDeprecatedTypeAlias(set.Logger, f, set.ID.Type())
-	logStabilityLevel(set.Logger, f, f.Stability())
+	sl := f.Stability()
+	var note string
+	if notes, ok := f.(extensionDeprecationMessageProvider); ok && sl == component.StabilityLevelDeprecated {
+		note = notes.DeprecationMessage()
+	}
+	logStabilityLevel(set.Logger, sl, note)
 	return f.Create(ctx, set, cfg)
 }
 

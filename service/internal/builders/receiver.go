@@ -46,7 +46,7 @@ func (b *ReceiverBuilder) CreateTraces(ctx context.Context, set receiver.Setting
 	}
 
 	logDeprecatedTypeAlias(set.Logger, f, set.ID.Type())
-	logStabilityLevel(set.Logger, f, f.TracesStability(), pipeline.SignalTraces)
+	logSignalStability(set.Logger, f, f.TracesStability(), pipeline.SignalTraces)
 	return f.CreateTraces(ctx, set, cfg, next)
 }
 
@@ -66,7 +66,7 @@ func (b *ReceiverBuilder) CreateMetrics(ctx context.Context, set receiver.Settin
 	}
 
 	logDeprecatedTypeAlias(set.Logger, f, set.ID.Type())
-	logStabilityLevel(set.Logger, f, f.MetricsStability(), pipeline.SignalMetrics)
+	logSignalStability(set.Logger, f, f.MetricsStability(), pipeline.SignalMetrics)
 	return f.CreateMetrics(ctx, set, cfg, next)
 }
 
@@ -86,7 +86,7 @@ func (b *ReceiverBuilder) CreateLogs(ctx context.Context, set receiver.Settings,
 	}
 
 	logDeprecatedTypeAlias(set.Logger, f, set.ID.Type())
-	logStabilityLevel(set.Logger, f, f.LogsStability(), pipeline.SignalLogs)
+	logSignalStability(set.Logger, f, f.LogsStability(), pipeline.SignalLogs)
 	return f.CreateLogs(ctx, set, cfg, next)
 }
 
@@ -111,7 +111,7 @@ func (b *ReceiverBuilder) CreateProfiles(ctx context.Context, set receiver.Setti
 	}
 
 	logDeprecatedTypeAlias(set.Logger, f, set.ID.Type())
-	logStabilityLevel(set.Logger, f, f.ProfilesStability(), xpipeline.SignalProfiles)
+	logSignalStability(set.Logger, f, f.ProfilesStability(), xpipeline.SignalProfiles)
 	return f.CreateProfiles(ctx, set, cfg, next)
 }
 

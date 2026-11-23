@@ -1736,8 +1736,6 @@ func TestGenerateStatusMetadata(t *testing.T) {
 package metadata
 
 import (
-	"slices"
-
 	"go.opentelemetry.io/collector/component"
 	"go.opentelemetry.io/collector/pipeline"
 )
@@ -1755,9 +1753,9 @@ const (
 // DeprecationNotes can be embedded in the factory to include migration guidance in the startup log.
 type DeprecationNotes struct{}
 
-func (DeprecationNotes) DeprecationMessage(signals ...pipeline.Signal) string {
-	switch {
-	case slices.Equal(signals, []pipeline.Signal{pipeline.SignalLogs}):
+func (DeprecationNotes) DeprecationMessage(signal pipeline.Signal) string {
+	switch signal {
+	case pipeline.SignalLogs:
 		return "Use \"bar\" for logs."
 	}
 	return ""
@@ -1847,11 +1845,11 @@ const (
 
 func TestGenerateDeprecationSignalRoutes(t *testing.T) {
 	for _, tt := range []struct {
-		class, key, signals string
+		class, key, want string
 	}{
-		{"connector", "profiles_to_traces", "xpipeline.SignalProfiles, pipeline.SignalTraces"},
-		{"connector", "traces_to_profiles", "pipeline.SignalTraces, xpipeline.SignalProfiles"},
-		{"extension", "extension", ""},
+		{"connector", "profiles_to_traces", "case from == xpipeline.SignalProfiles && to == pipeline.SignalTraces:"},
+		{"connector", "traces_to_profiles", "case from == pipeline.SignalTraces && to == xpipeline.SignalProfiles:"},
+		{"extension", "extension", "DeprecationMessage() string {\n\treturn \"Use the replacement.\""},
 	} {
 		t.Run(tt.key, func(t *testing.T) {
 			md := Metadata{Type: "sample", Status: &Status{
@@ -1863,7 +1861,7 @@ func TestGenerateDeprecationSignalRoutes(t *testing.T) {
 			require.NoError(t, generateFile("templates/status.go.tmpl", path, md, "metadata", "go.opentelemetry.io/collector"))
 			src, err := os.ReadFile(filepath.Clean(path))
 			require.NoError(t, err)
-			require.Contains(t, string(src), "slices.Equal(signals, []pipeline.Signal{"+tt.signals+"})")
+			require.Contains(t, string(src), tt.want)
 			require.Equal(t, tt.class == "connector", strings.Contains(string(src), `"go.opentelemetry.io/collector/pipeline/xpipeline"`))
 		})
 	}

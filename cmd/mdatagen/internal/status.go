@@ -66,24 +66,19 @@ func (dm DeprecationMap) UsesProfiles() bool {
 	return false
 }
 
-// deprecationSignalRefs translates a metadata stability key to Go signal identifiers.
-func deprecationSignalRefs(key string) ([]string, error) {
-	if !slices.Contains(validStabilityKeys, key) {
-		return nil, fmt.Errorf("unknown deprecation key %q", key)
+func signalRef(signal string) (string, error) {
+	switch signal {
+	case "logs":
+		return "pipeline.SignalLogs", nil
+	case "metrics":
+		return "pipeline.SignalMetrics", nil
+	case "traces":
+		return "pipeline.SignalTraces", nil
+	case "profiles":
+		return "xpipeline.SignalProfiles", nil
+	default:
+		return "", fmt.Errorf("unknown pipeline signal %q", signal)
 	}
-	switch key {
-	case "extension", "converter", "provider":
-		return nil, nil
-	}
-	signals := strings.Split(key, "_to_")
-	for i, signal := range signals {
-		if signal == "profiles" {
-			signals[i] = "xpipeline.SignalProfiles"
-		} else {
-			signals[i] = "pipeline.Signal" + joinCamelCase([]string{signal}, true)
-		}
-	}
-	return signals, nil
 }
 
 type DeprecationInfo struct {
@@ -211,6 +206,11 @@ func (ms StabilityMap) Validate() error {
 
 func (dm DeprecationMap) Validate(ms StabilityMap) error {
 	var errs error
+	for key := range dm {
+		if !slices.Contains(validStabilityKeys, key) {
+			errs = errors.Join(errs, fmt.Errorf("unknown deprecation key %q", key))
+		}
+	}
 	for stability, cmps := range ms {
 		if stability != component.StabilityLevelDeprecated {
 			continue

@@ -19,21 +19,22 @@ var (
 	NopType            = component.MustNewType("nop")
 )
 
-// deprecationMessageProvider supplies migration guidance for a signal, an ordered
-// input/output signal pair (connectors), or no signals (extensions).
-type deprecationMessageProvider interface {
-	DeprecationMessage(signals ...pipeline.Signal) string
+type signalDeprecationMessageProvider interface {
+	DeprecationMessage(pipeline.Signal) string
 }
 
-// logStabilityLevel logs the stability level of a component. The log level is set to info for
-// undefined, unmaintained, deprecated and development. The log level is set to debug
-// for alpha, beta and stable.
-func logStabilityLevel(logger *zap.Logger, factory component.Factory, sl component.StabilityLevel, signals ...pipeline.Signal) {
+func logSignalStability(logger *zap.Logger, factory component.Factory, sl component.StabilityLevel, signal pipeline.Signal) {
+	var note string
+	if notes, ok := factory.(signalDeprecationMessageProvider); ok && sl == component.StabilityLevelDeprecated {
+		note = notes.DeprecationMessage(signal)
+	}
+	logStabilityLevel(logger, sl, note)
+}
+
+func logStabilityLevel(logger *zap.Logger, sl component.StabilityLevel, note string) {
 	message := sl.LogMessage()
-	if notes, ok := factory.(deprecationMessageProvider); ok && sl == component.StabilityLevelDeprecated {
-		if note := notes.DeprecationMessage(signals...); note != "" {
-			message += " " + note
-		}
+	if note != "" {
+		message += " " + note
 	}
 	if sl >= component.StabilityLevelAlpha {
 		logger.Debug(message)
