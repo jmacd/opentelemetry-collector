@@ -21,11 +21,17 @@ var (
 // logStabilityLevel logs the stability level of a component. The log level is set to info for
 // undefined, unmaintained, deprecated and development. The log level is set to debug
 // for alpha, beta and stable.
-func logStabilityLevel(logger *zap.Logger, sl component.StabilityLevel) {
+func logStabilityLevel(logger *zap.Logger, factory component.Factory, stabilityKey string, sl component.StabilityLevel) {
+	message := sl.LogMessage()
+	if notes, ok := factory.(interface{ DeprecationMessage(string) string }); ok && sl == component.StabilityLevelDeprecated {
+		if note := notes.DeprecationMessage(stabilityKey); note != "" {
+			message += " " + note
+		}
+	}
 	if sl >= component.StabilityLevelAlpha {
-		logger.Debug(sl.LogMessage())
+		logger.Debug(message)
 	} else {
-		logger.Info(sl.LogMessage())
+		logger.Info(message)
 	}
 }
 

@@ -1714,12 +1714,16 @@ func TestGenerateStatusMetadata(t *testing.T) {
 		expected string
 	}{
 		{
-			name: "foo component with beta status",
+			name: "foo component with a deprecated signal",
 			md: Metadata{
 				Type: "foo",
 				Status: &Status{
 					Stability: map[component.StabilityLevel][]string{
-						component.StabilityLevelBeta: {"metrics"},
+						component.StabilityLevelBeta:       {"metrics"},
+						component.StabilityLevelDeprecated: {"logs"},
+					},
+					Deprecation: DeprecationMap{
+						"logs": {Migration: "Use \"bar\" for logs.\n"},
 					},
 					Distributions: []string{"contrib"},
 					Class:         "receiver",
@@ -1741,8 +1745,20 @@ var (
 )
 
 const (
+	LogsStability    = component.StabilityLevelDeprecated
 	MetricsStability = component.StabilityLevelBeta
 )
+
+// DeprecationNotes can be embedded in the factory to include migration guidance in the startup log.
+type DeprecationNotes struct{}
+
+func (DeprecationNotes) DeprecationMessage(stabilityKey string) string {
+	switch stabilityKey {
+	case "logs":
+		return "Use \"bar\" for logs."
+	}
+	return ""
+}
 `,
 		},
 		{

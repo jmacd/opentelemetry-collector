@@ -19,3 +19,14 @@ const (
 	TracesStability   = component.StabilityLevelBeta
 	MetricsStability  = component.StabilityLevelStable
 )
+
+// DeprecationNotes can be embedded in the factory to include migration guidance in the startup log.
+type DeprecationNotes struct{}
+
+func (DeprecationNotes) DeprecationMessage(stabilityKey string) string {
+	switch stabilityKey {
+	case "profiles":
+		return "no migration needed"
+	}
+	return ""
+}

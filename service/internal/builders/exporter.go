@@ -38,7 +38,7 @@ func (b *ExporterBuilder) CreateTraces(ctx context.Context, set exporter.Setting
 	}
 
 	logDeprecatedTypeAlias(set.Logger, f, set.ID.Type())
-	logStabilityLevel(set.Logger, f.TracesStability())
+	logStabilityLevel(set.Logger, f, "traces", f.TracesStability())
 	return f.CreateTraces(ctx, set, cfg)
 }
 
@@ -55,7 +55,7 @@ func (b *ExporterBuilder) CreateMetrics(ctx context.Context, set exporter.Settin
 	}
 
 	logDeprecatedTypeAlias(set.Logger, f, set.ID.Type())
-	logStabilityLevel(set.Logger, f.MetricsStability())
+	logStabilityLevel(set.Logger, f, "metrics", f.MetricsStability())
 	return f.CreateMetrics(ctx, set, cfg)
 }
 
@@ -72,7 +72,7 @@ func (b *ExporterBuilder) CreateLogs(ctx context.Context, set exporter.Settings)
 	}
 
 	logDeprecatedTypeAlias(set.Logger, f, set.ID.Type())
-	logStabilityLevel(set.Logger, f.LogsStability())
+	logStabilityLevel(set.Logger, f, "logs", f.LogsStability())
 	return f.CreateLogs(ctx, set, cfg)
 }
 
@@ -94,7 +94,7 @@ func (b *ExporterBuilder) CreateProfiles(ctx context.Context, set exporter.Setti
 	}
 
 	logDeprecatedTypeAlias(set.Logger, f, set.ID.Type())
-	logStabilityLevel(set.Logger, f.ProfilesStability())
+	logStabilityLevel(set.Logger, f, "profiles", f.ProfilesStability())
 	return f.CreateProfiles(ctx, set, cfg)
 }
 

@@ -45,7 +45,7 @@ func (b *ReceiverBuilder) CreateTraces(ctx context.Context, set receiver.Setting
 	}
 
 	logDeprecatedTypeAlias(set.Logger, f, set.ID.Type())
-	logStabilityLevel(set.Logger, f.TracesStability())
+	logStabilityLevel(set.Logger, f, "traces", f.TracesStability())
 	return f.CreateTraces(ctx, set, cfg, next)
 }
 
@@ -65,7 +65,7 @@ func (b *ReceiverBuilder) CreateMetrics(ctx context.Context, set receiver.Settin
 	}
 
 	logDeprecatedTypeAlias(set.Logger, f, set.ID.Type())
-	logStabilityLevel(set.Logger, f.MetricsStability())
+	logStabilityLevel(set.Logger, f, "metrics", f.MetricsStability())
 	return f.CreateMetrics(ctx, set, cfg, next)
 }
 
@@ -85,7 +85,7 @@ func (b *ReceiverBuilder) CreateLogs(ctx context.Context, set receiver.Settings,
 	}
 
 	logDeprecatedTypeAlias(set.Logger, f, set.ID.Type())
-	logStabilityLevel(set.Logger, f.LogsStability())
+	logStabilityLevel(set.Logger, f, "logs", f.LogsStability())
 	return f.CreateLogs(ctx, set, cfg, next)
 }
 
@@ -110,7 +110,7 @@ func (b *ReceiverBuilder) CreateProfiles(ctx context.Context, set receiver.Setti
 	}
 
 	logDeprecatedTypeAlias(set.Logger, f, set.ID.Type())
-	logStabilityLevel(set.Logger, f.ProfilesStability())
+	logStabilityLevel(set.Logger, f, "profiles", f.ProfilesStability())
 	return f.CreateProfiles(ctx, set, cfg, next)
 }
 

@@ -339,6 +339,12 @@ When a component is moved to deprecated, a deprecation section should indicate t
 as well as any migration guidance. In some occasions might not be offered migration guidance but reviewers should
 explicitly agree on this, and use a "No migration is offered for this component" hint.
 
+To include the same guidance in the Collector's startup log, embed the
+`metadata.DeprecationNotes` generated from `status.deprecation` in the component's
+factory. The Collector appends the migration text for the deprecated signal to
+its standard stability message. Use a plain URL for links so they work in logs
+as well as in the README.
+
 ## Versioning
 
 For a component to be marked as 1.x it MUST be stable for at least one signal.

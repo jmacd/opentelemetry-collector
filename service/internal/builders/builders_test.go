@@ -6,6 +6,7 @@ package builders
 import (
 	"testing"
 
+	"github.com/stretchr/testify/require"
 	"go.uber.org/zap"
 	"go.uber.org/zap/zaptest/observer"
 
@@ -24,6 +25,36 @@ func (m *mockFactory) Type() component.Type {
 
 func (m *mockFactory) CreateDefaultConfig() component.Config {
 	return nil
+}
+
+type factoryWithNotes struct{ mockFactory }
+
+func (*factoryWithNotes) DeprecationMessage(key string) string {
+	if key == "logs" {
+		return "See https://example.org/migration"
+	}
+	return ""
+}
+
+func TestLogStabilityLevelWithMigration(t *testing.T) {
+	core, logs := observer.New(zap.DebugLevel)
+	logger := zap.New(core)
+	deprecated := component.StabilityLevelDeprecated
+	f := &factoryWithNotes{}
+
+	logStabilityLevel(logger, f, "logs", deprecated)
+	logStabilityLevel(logger, f, "traces", deprecated)
+	logStabilityLevel(logger, &mockFactory{}, "logs", deprecated)
+	logStabilityLevel(logger, f, "logs", component.StabilityLevelBeta)
+
+	entries := logs.TakeAll()
+	require.Len(t, entries, 4)
+	require.Equal(t, zap.InfoLevel, entries[0].Level)
+	require.Equal(t, deprecated.LogMessage()+" See https://example.org/migration", entries[0].Message)
+	require.Equal(t, deprecated.LogMessage(), entries[1].Message)
+	require.Equal(t, deprecated.LogMessage(), entries[2].Message)
+	require.Equal(t, zap.DebugLevel, entries[3].Level)
+	require.Equal(t, component.StabilityLevelBeta.LogMessage(), entries[3].Message)
 }
 
 // mockFactoryWithAlias is a test factory that implements both component.Factory and componentalias.TypeAliasHolder

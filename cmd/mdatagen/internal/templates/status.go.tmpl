@@ -28,6 +28,21 @@ const (
 	{{- end }}
 )
 
+{{ if .Status.Deprecation -}}
+// DeprecationNotes can be embedded in the factory to include migration guidance in the startup log.
+type DeprecationNotes struct{}
+
+func (DeprecationNotes) DeprecationMessage(stabilityKey string) string {
+	switch stabilityKey {
+	{{- range $key, $info := .Status.Deprecation }}
+	case {{ printf "%q" $key }}:
+		return {{ printf "%q" (trimRight $info.Migration "\r\n") }}
+	{{- end }}
+	}
+	return ""
+}
+{{ end -}}
+
 {{ if and isExporter (not .SendingQueue.IsOmitted) -}}
 // NewDefaultSendingQueueConfig returns the sending queue default declared in metadata.yaml.
 func NewDefaultSendingQueueConfig() configoptional.Optional[exporterhelper.QueueBatchConfig] {

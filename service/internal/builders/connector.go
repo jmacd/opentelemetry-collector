@@ -48,7 +48,7 @@ func (b *ConnectorBuilder) CreateTracesToTraces(ctx context.Context, set connect
 	}
 
 	logDeprecatedTypeAlias(set.Logger, f, set.ID.Type())
-	logStabilityLevel(set.Logger, f.TracesToTracesStability())
+	logStabilityLevel(set.Logger, f, "traces_to_traces", f.TracesToTracesStability())
 	return f.CreateTracesToTraces(ctx, set, cfg, next)
 }
 
@@ -68,7 +68,7 @@ func (b *ConnectorBuilder) CreateTracesToMetrics(ctx context.Context, set connec
 	}
 
 	logDeprecatedTypeAlias(set.Logger, f, set.ID.Type())
-	logStabilityLevel(set.Logger, f.TracesToMetricsStability())
+	logStabilityLevel(set.Logger, f, "traces_to_metrics", f.TracesToMetricsStability())
 	return f.CreateTracesToMetrics(ctx, set, cfg, next)
 }
 
@@ -88,7 +88,7 @@ func (b *ConnectorBuilder) CreateTracesToLogs(ctx context.Context, set connector
 	}
 
 	logDeprecatedTypeAlias(set.Logger, f, set.ID.Type())
-	logStabilityLevel(set.Logger, f.TracesToLogsStability())
+	logStabilityLevel(set.Logger, f, "traces_to_logs", f.TracesToLogsStability())
 	return f.CreateTracesToLogs(ctx, set, cfg, next)
 }
 
@@ -113,7 +113,7 @@ func (b *ConnectorBuilder) CreateTracesToProfiles(ctx context.Context, set conne
 	}
 
 	logDeprecatedTypeAlias(set.Logger, f, set.ID.Type())
-	logStabilityLevel(set.Logger, f.TracesToProfilesStability())
+	logStabilityLevel(set.Logger, f, "traces_to_profiles", f.TracesToProfilesStability())
 	return f.CreateTracesToProfiles(ctx, set, cfg, next)
 }
 
@@ -133,7 +133,7 @@ func (b *ConnectorBuilder) CreateMetricsToTraces(ctx context.Context, set connec
 	}
 
 	logDeprecatedTypeAlias(set.Logger, f, set.ID.Type())
-	logStabilityLevel(set.Logger, f.MetricsToTracesStability())
+	logStabilityLevel(set.Logger, f, "metrics_to_traces", f.MetricsToTracesStability())
 	return f.CreateMetricsToTraces(ctx, set, cfg, next)
 }
 
@@ -153,7 +153,7 @@ func (b *ConnectorBuilder) CreateMetricsToMetrics(ctx context.Context, set conne
 	}
 
 	logDeprecatedTypeAlias(set.Logger, f, set.ID.Type())
-	logStabilityLevel(set.Logger, f.MetricsToMetricsStability())
+	logStabilityLevel(set.Logger, f, "metrics_to_metrics", f.MetricsToMetricsStability())
 	return f.CreateMetricsToMetrics(ctx, set, cfg, next)
 }
 
@@ -173,7 +173,7 @@ func (b *ConnectorBuilder) CreateMetricsToLogs(ctx context.Context, set connecto
 	}
 
 	logDeprecatedTypeAlias(set.Logger, f, set.ID.Type())
-	logStabilityLevel(set.Logger, f.MetricsToLogsStability())
+	logStabilityLevel(set.Logger, f, "metrics_to_logs", f.MetricsToLogsStability())
 	return f.CreateMetricsToLogs(ctx, set, cfg, next)
 }
 
@@ -198,7 +198,7 @@ func (b *ConnectorBuilder) CreateMetricsToProfiles(ctx context.Context, set conn
 	}
 
 	logDeprecatedTypeAlias(set.Logger, f, set.ID.Type())
-	logStabilityLevel(set.Logger, f.MetricsToProfilesStability())
+	logStabilityLevel(set.Logger, f, "metrics_to_profiles", f.MetricsToProfilesStability())
 	return f.CreateMetricsToProfiles(ctx, set, cfg, next)
 }
 
@@ -218,7 +218,7 @@ func (b *ConnectorBuilder) CreateLogsToTraces(ctx context.Context, set connector
 	}
 
 	logDeprecatedTypeAlias(set.Logger, f, set.ID.Type())
-	logStabilityLevel(set.Logger, f.LogsToTracesStability())
+	logStabilityLevel(set.Logger, f, "logs_to_traces", f.LogsToTracesStability())
 	return f.CreateLogsToTraces(ctx, set, cfg, next)
 }
 
@@ -238,7 +238,7 @@ func (b *ConnectorBuilder) CreateLogsToMetrics(ctx context.Context, set connecto
 	}
 
 	logDeprecatedTypeAlias(set.Logger, f, set.ID.Type())
-	logStabilityLevel(set.Logger, f.LogsToMetricsStability())
+	logStabilityLevel(set.Logger, f, "logs_to_metrics", f.LogsToMetricsStability())
 	return f.CreateLogsToMetrics(ctx, set, cfg, next)
 }
 
@@ -258,7 +258,7 @@ func (b *ConnectorBuilder) CreateLogsToLogs(ctx context.Context, set connector.S
 	}
 
 	logDeprecatedTypeAlias(set.Logger, f, set.ID.Type())
-	logStabilityLevel(set.Logger, f.LogsToLogsStability())
+	logStabilityLevel(set.Logger, f, "logs_to_logs", f.LogsToLogsStability())
 	return f.CreateLogsToLogs(ctx, set, cfg, next)
 }
 
@@ -283,7 +283,7 @@ func (b *ConnectorBuilder) CreateLogsToProfiles(ctx context.Context, set connect
 	}
 
 	logDeprecatedTypeAlias(set.Logger, f, set.ID.Type())
-	logStabilityLevel(set.Logger, f.LogsToProfilesStability())
+	logStabilityLevel(set.Logger, f, "logs_to_profiles", f.LogsToProfilesStability())
 	return f.CreateLogsToProfiles(ctx, set, cfg, next)
 }
 
@@ -308,7 +308,7 @@ func (b *ConnectorBuilder) CreateProfilesToTraces(ctx context.Context, set conne
 	}
 
 	logDeprecatedTypeAlias(set.Logger, f, set.ID.Type())
-	logStabilityLevel(set.Logger, f.ProfilesToTracesStability())
+	logStabilityLevel(set.Logger, f, "profiles_to_traces", f.ProfilesToTracesStability())
 	return f.CreateProfilesToTraces(ctx, set, cfg, next)
 }
 
@@ -333,7 +333,7 @@ func (b *ConnectorBuilder) CreateProfilesToMetrics(ctx context.Context, set conn
 	}
 
 	logDeprecatedTypeAlias(set.Logger, f, set.ID.Type())
-	logStabilityLevel(set.Logger, f.ProfilesToMetricsStability())
+	logStabilityLevel(set.Logger, f, "profiles_to_metrics", f.ProfilesToMetricsStability())
 	return f.CreateProfilesToMetrics(ctx, set, cfg, next)
 }
 
@@ -358,7 +358,7 @@ func (b *ConnectorBuilder) CreateProfilesToLogs(ctx context.Context, set connect
 	}
 
 	logDeprecatedTypeAlias(set.Logger, f, set.ID.Type())
-	logStabilityLevel(set.Logger, f.ProfilesToLogsStability())
+	logStabilityLevel(set.Logger, f, "profiles_to_logs", f.ProfilesToLogsStability())
 	return f.CreateProfilesToLogs(ctx, set, cfg, next)
 }
 
@@ -383,7 +383,7 @@ func (b *ConnectorBuilder) CreateProfilesToProfiles(ctx context.Context, set con
 	}
 
 	logDeprecatedTypeAlias(set.Logger, f, set.ID.Type())
-	logStabilityLevel(set.Logger, f.ProfilesToProfilesStability())
+	logStabilityLevel(set.Logger, f, "profiles_to_profiles", f.ProfilesToProfilesStability())
 	return f.CreateProfilesToProfiles(ctx, set, cfg, next)
 }
 

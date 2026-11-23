@@ -44,7 +44,7 @@ func (b *ProcessorBuilder) CreateTraces(ctx context.Context, set processor.Setti
 	}
 
 	logDeprecatedTypeAlias(set.Logger, f, set.ID.Type())
-	logStabilityLevel(set.Logger, f.TracesStability())
+	logStabilityLevel(set.Logger, f, "traces", f.TracesStability())
 	return f.CreateTraces(ctx, set, cfg, next)
 }
 
@@ -64,7 +64,7 @@ func (b *ProcessorBuilder) CreateMetrics(ctx context.Context, set processor.Sett
 	}
 
 	logDeprecatedTypeAlias(set.Logger, f, set.ID.Type())
-	logStabilityLevel(set.Logger, f.MetricsStability())
+	logStabilityLevel(set.Logger, f, "metrics", f.MetricsStability())
 	return f.CreateMetrics(ctx, set, cfg, next)
 }
 
@@ -84,7 +84,7 @@ func (b *ProcessorBuilder) CreateLogs(ctx context.Context, set processor.Setting
 	}
 
 	logDeprecatedTypeAlias(set.Logger, f, set.ID.Type())
-	logStabilityLevel(set.Logger, f.LogsStability())
+	logStabilityLevel(set.Logger, f, "logs", f.LogsStability())
 	return f.CreateLogs(ctx, set, cfg, next)
 }
 
@@ -108,7 +108,7 @@ func (b *ProcessorBuilder) CreateProfiles(ctx context.Context, set processor.Set
 		return nil, pipeline.ErrSignalNotSupported
 	}
 	logDeprecatedTypeAlias(set.Logger, f, set.ID.Type())
-	logStabilityLevel(set.Logger, f.ProfilesStability())
+	logStabilityLevel(set.Logger, f, "profiles", f.ProfilesStability())
 	return f.CreateProfiles(ctx, set, cfg, next)
 }
 

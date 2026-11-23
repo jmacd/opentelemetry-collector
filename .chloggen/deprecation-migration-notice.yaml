@@ -1,0 +1,5 @@
+change_type: enhancement
+component: cmd/mdatagen
+note: Generate migration notes that component factories can include in the Collector's standard startup deprecation message.
+issues: [12022]
+change_logs: [user, api]
