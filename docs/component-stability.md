@@ -342,8 +342,9 @@ explicitly agree on this, and use a "No migration is offered for this component"
 To include the same guidance in the Collector's startup log, embed the
 `metadata.DeprecationNotes` generated from `status.deprecation` in the component's
 factory. The Collector appends the migration text for the deprecated signal to
-its standard stability message. Use a plain URL for links so they work in logs
-as well as in the README.
+its standard stability message. For connectors, the note is specific to the
+input and output signals, in that order. Extensions have a single component-wide
+note. Use a plain URL for links so they work in logs as well as in the README.
 
 ## Versioning
 

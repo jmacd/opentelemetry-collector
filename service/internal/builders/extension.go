@@ -44,7 +44,7 @@ func (b *ExtensionBuilder) Create(ctx context.Context, set extension.Settings) (
 	}
 
 	logDeprecatedTypeAlias(set.Logger, f, set.ID.Type())
-	logStabilityLevel(set.Logger, f, "extension", f.Stability())
+	logStabilityLevel(set.Logger, f, f.Stability())
 	return f.Create(ctx, set, cfg)
 }
 

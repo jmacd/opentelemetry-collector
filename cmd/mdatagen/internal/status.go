@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"slices"
 	"sort"
+	"strings"
 	"time"
 
 	"go.opentelemetry.io/collector/component"
@@ -55,6 +56,35 @@ type Status struct {
 }
 
 type DeprecationMap map[string]DeprecationInfo
+
+func (dm DeprecationMap) UsesProfiles() bool {
+	for key := range dm {
+		if slices.Contains(strings.Split(key, "_to_"), "profiles") {
+			return true
+		}
+	}
+	return false
+}
+
+// deprecationSignalRefs translates a metadata stability key to Go signal identifiers.
+func deprecationSignalRefs(key string) ([]string, error) {
+	if !slices.Contains(validStabilityKeys, key) {
+		return nil, fmt.Errorf("unknown deprecation key %q", key)
+	}
+	switch key {
+	case "extension", "converter", "provider":
+		return nil, nil
+	}
+	signals := strings.Split(key, "_to_")
+	for i, signal := range signals {
+		if signal == "profiles" {
+			signals[i] = "xpipeline.SignalProfiles"
+		} else {
+			signals[i] = "pipeline.Signal" + joinCamelCase([]string{signal}, true)
+		}
+	}
+	return signals, nil
+}
 
 type DeprecationInfo struct {
 	Date      string `mapstructure:"date"`

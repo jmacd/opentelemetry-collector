@@ -4,14 +4,18 @@
 package builders
 
 import (
+	"slices"
 	"testing"
 
 	"github.com/stretchr/testify/require"
 	"go.uber.org/zap"
+	"go.uber.org/zap/zapcore"
 	"go.uber.org/zap/zaptest/observer"
 
 	"go.opentelemetry.io/collector/component"
 	"go.opentelemetry.io/collector/internal/componentalias"
+	"go.opentelemetry.io/collector/pipeline"
+	"go.opentelemetry.io/collector/pipeline/xpipeline"
 )
 
 // mockFactory is a test factory that implements component.Factory
@@ -29,32 +33,46 @@ func (m *mockFactory) CreateDefaultConfig() component.Config {
 
 type factoryWithNotes struct{ mockFactory }
 
-func (*factoryWithNotes) DeprecationMessage(key string) string {
-	if key == "logs" {
+func (*factoryWithNotes) DeprecationMessage(signals ...pipeline.Signal) string {
+	switch {
+	case len(signals) == 0:
+		return "Migrate the extension."
+	case slices.Equal(signals, []pipeline.Signal{pipeline.SignalLogs}):
 		return "See https://example.org/migration"
+	case slices.Equal(signals, []pipeline.Signal{pipeline.SignalLogs, xpipeline.SignalProfiles}):
+		return "Migrate the logs-to-profiles connector."
 	}
 	return ""
 }
 
 func TestLogStabilityLevelWithMigration(t *testing.T) {
-	core, logs := observer.New(zap.DebugLevel)
-	logger := zap.New(core)
 	deprecated := component.StabilityLevelDeprecated
 	f := &factoryWithNotes{}
-
-	logStabilityLevel(logger, f, "logs", deprecated)
-	logStabilityLevel(logger, f, "traces", deprecated)
-	logStabilityLevel(logger, &mockFactory{}, "logs", deprecated)
-	logStabilityLevel(logger, f, "logs", component.StabilityLevelBeta)
-
-	entries := logs.TakeAll()
-	require.Len(t, entries, 4)
-	require.Equal(t, zap.InfoLevel, entries[0].Level)
-	require.Equal(t, deprecated.LogMessage()+" See https://example.org/migration", entries[0].Message)
-	require.Equal(t, deprecated.LogMessage(), entries[1].Message)
-	require.Equal(t, deprecated.LogMessage(), entries[2].Message)
-	require.Equal(t, zap.DebugLevel, entries[3].Level)
-	require.Equal(t, component.StabilityLevelBeta.LogMessage(), entries[3].Message)
+	for _, tt := range []struct {
+		name    string
+		factory component.Factory
+		signals []pipeline.Signal
+		sl      component.StabilityLevel
+		level   zapcore.Level
+		want    string
+	}{
+		{"signal", f, []pipeline.Signal{pipeline.SignalLogs}, deprecated, zap.InfoLevel, deprecated.LogMessage() + " See https://example.org/migration"},
+		{"other signal", f, []pipeline.Signal{pipeline.SignalTraces}, deprecated, zap.InfoLevel, deprecated.LogMessage()},
+		{"connector", f, []pipeline.Signal{pipeline.SignalLogs, xpipeline.SignalProfiles}, deprecated, zap.InfoLevel, deprecated.LogMessage() + " Migrate the logs-to-profiles connector."},
+		{"reverse connector", f, []pipeline.Signal{xpipeline.SignalProfiles, pipeline.SignalLogs}, deprecated, zap.InfoLevel, deprecated.LogMessage()},
+		{"extension", f, nil, deprecated, zap.InfoLevel, deprecated.LogMessage() + " Migrate the extension."},
+		{"no provider", &mockFactory{}, nil, deprecated, zap.InfoLevel, deprecated.LogMessage()},
+		{"not deprecated", f, []pipeline.Signal{pipeline.SignalLogs}, component.StabilityLevelBeta, zap.DebugLevel, component.StabilityLevelBeta.LogMessage()},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			core, logs := observer.New(zap.DebugLevel)
+			logStabilityLevel(zap.New(core), tt.factory, tt.sl, tt.signals...)
+			entries := logs.All()
+			require.Len(t, entries, 1)
+			require.Equal(t, tt.level, entries[0].Level)
+			require.Equal(t, tt.want, entries[0].Message)
+		})
+	}
 }
 
 // mockFactoryWithAlias is a test factory that implements both component.Factory and componentalias.TypeAliasHolder

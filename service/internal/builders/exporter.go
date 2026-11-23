@@ -12,6 +12,7 @@ import (
 	"go.opentelemetry.io/collector/exporter/exportertest"
 	"go.opentelemetry.io/collector/exporter/xexporter"
 	"go.opentelemetry.io/collector/pipeline"
+	"go.opentelemetry.io/collector/pipeline/xpipeline"
 )
 
 // ExporterBuilder is a helper struct that given a set of Configs and Factories helps with creating exporters.
@@ -38,7 +39,7 @@ func (b *ExporterBuilder) CreateTraces(ctx context.Context, set exporter.Setting
 	}
 
 	logDeprecatedTypeAlias(set.Logger, f, set.ID.Type())
-	logStabilityLevel(set.Logger, f, "traces", f.TracesStability())
+	logStabilityLevel(set.Logger, f, f.TracesStability(), pipeline.SignalTraces)
 	return f.CreateTraces(ctx, set, cfg)
 }
 
@@ -55,7 +56,7 @@ func (b *ExporterBuilder) CreateMetrics(ctx context.Context, set exporter.Settin
 	}
 
 	logDeprecatedTypeAlias(set.Logger, f, set.ID.Type())
-	logStabilityLevel(set.Logger, f, "metrics", f.MetricsStability())
+	logStabilityLevel(set.Logger, f, f.MetricsStability(), pipeline.SignalMetrics)
 	return f.CreateMetrics(ctx, set, cfg)
 }
 
@@ -72,7 +73,7 @@ func (b *ExporterBuilder) CreateLogs(ctx context.Context, set exporter.Settings)
 	}
 
 	logDeprecatedTypeAlias(set.Logger, f, set.ID.Type())
-	logStabilityLevel(set.Logger, f, "logs", f.LogsStability())
+	logStabilityLevel(set.Logger, f, f.LogsStability(), pipeline.SignalLogs)
 	return f.CreateLogs(ctx, set, cfg)
 }
 
@@ -94,7 +95,7 @@ func (b *ExporterBuilder) CreateProfiles(ctx context.Context, set exporter.Setti
 	}
 
 	logDeprecatedTypeAlias(set.Logger, f, set.ID.Type())
-	logStabilityLevel(set.Logger, f, "profiles", f.ProfilesStability())
+	logStabilityLevel(set.Logger, f, f.ProfilesStability(), xpipeline.SignalProfiles)
 	return f.CreateProfiles(ctx, set, cfg)
 }
 

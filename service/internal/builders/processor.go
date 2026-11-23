@@ -11,6 +11,7 @@ import (
 	"go.opentelemetry.io/collector/consumer"
 	"go.opentelemetry.io/collector/consumer/xconsumer"
 	"go.opentelemetry.io/collector/pipeline"
+	"go.opentelemetry.io/collector/pipeline/xpipeline"
 	"go.opentelemetry.io/collector/processor"
 	"go.opentelemetry.io/collector/processor/processortest"
 	"go.opentelemetry.io/collector/processor/xprocessor"
@@ -44,7 +45,7 @@ func (b *ProcessorBuilder) CreateTraces(ctx context.Context, set processor.Setti
 	}
 
 	logDeprecatedTypeAlias(set.Logger, f, set.ID.Type())
-	logStabilityLevel(set.Logger, f, "traces", f.TracesStability())
+	logStabilityLevel(set.Logger, f, f.TracesStability(), pipeline.SignalTraces)
 	return f.CreateTraces(ctx, set, cfg, next)
 }
 
@@ -64,7 +65,7 @@ func (b *ProcessorBuilder) CreateMetrics(ctx context.Context, set processor.Sett
 	}
 
 	logDeprecatedTypeAlias(set.Logger, f, set.ID.Type())
-	logStabilityLevel(set.Logger, f, "metrics", f.MetricsStability())
+	logStabilityLevel(set.Logger, f, f.MetricsStability(), pipeline.SignalMetrics)
 	return f.CreateMetrics(ctx, set, cfg, next)
 }
 
@@ -84,7 +85,7 @@ func (b *ProcessorBuilder) CreateLogs(ctx context.Context, set processor.Setting
 	}
 
 	logDeprecatedTypeAlias(set.Logger, f, set.ID.Type())
-	logStabilityLevel(set.Logger, f, "logs", f.LogsStability())
+	logStabilityLevel(set.Logger, f, f.LogsStability(), pipeline.SignalLogs)
 	return f.CreateLogs(ctx, set, cfg, next)
 }
 
@@ -108,7 +109,7 @@ func (b *ProcessorBuilder) CreateProfiles(ctx context.Context, set processor.Set
 		return nil, pipeline.ErrSignalNotSupported
 	}
 	logDeprecatedTypeAlias(set.Logger, f, set.ID.Type())
-	logStabilityLevel(set.Logger, f, "profiles", f.ProfilesStability())
+	logStabilityLevel(set.Logger, f, f.ProfilesStability(), xpipeline.SignalProfiles)
 	return f.CreateProfiles(ctx, set, cfg, next)
 }
 

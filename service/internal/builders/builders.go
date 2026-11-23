@@ -11,6 +11,7 @@ import (
 
 	"go.opentelemetry.io/collector/component"
 	"go.opentelemetry.io/collector/internal/componentalias"
+	"go.opentelemetry.io/collector/pipeline"
 )
 
 var (
@@ -18,13 +19,19 @@ var (
 	NopType            = component.MustNewType("nop")
 )
 
+// deprecationMessageProvider supplies migration guidance for a signal, an ordered
+// input/output signal pair (connectors), or no signals (extensions).
+type deprecationMessageProvider interface {
+	DeprecationMessage(signals ...pipeline.Signal) string
+}
+
 // logStabilityLevel logs the stability level of a component. The log level is set to info for
 // undefined, unmaintained, deprecated and development. The log level is set to debug
 // for alpha, beta and stable.
-func logStabilityLevel(logger *zap.Logger, factory component.Factory, stabilityKey string, sl component.StabilityLevel) {
+func logStabilityLevel(logger *zap.Logger, factory component.Factory, sl component.StabilityLevel, signals ...pipeline.Signal) {
 	message := sl.LogMessage()
-	if notes, ok := factory.(interface{ DeprecationMessage(string) string }); ok && sl == component.StabilityLevelDeprecated {
-		if note := notes.DeprecationMessage(stabilityKey); note != "" {
+	if notes, ok := factory.(deprecationMessageProvider); ok && sl == component.StabilityLevelDeprecated {
+		if note := notes.DeprecationMessage(signals...); note != "" {
 			message += " " + note
 		}
 	}

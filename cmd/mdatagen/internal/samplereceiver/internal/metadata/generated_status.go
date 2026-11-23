@@ -5,7 +5,11 @@
 package metadata
 
 import (
+	"slices"
+
 	"go.opentelemetry.io/collector/component"
+	"go.opentelemetry.io/collector/pipeline"
+	"go.opentelemetry.io/collector/pipeline/xpipeline"
 )
 
 var (
@@ -23,9 +27,9 @@ const (
 // DeprecationNotes can be embedded in the factory to include migration guidance in the startup log.
 type DeprecationNotes struct{}
 
-func (DeprecationNotes) DeprecationMessage(stabilityKey string) string {
-	switch stabilityKey {
-	case "profiles":
+func (DeprecationNotes) DeprecationMessage(signals ...pipeline.Signal) string {
+	switch {
+	case slices.Equal(signals, []pipeline.Signal{xpipeline.SignalProfiles}):
 		return "no migration needed"
 	}
 	return ""

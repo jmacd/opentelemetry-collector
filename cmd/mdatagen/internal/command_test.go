@@ -1736,7 +1736,10 @@ func TestGenerateStatusMetadata(t *testing.T) {
 package metadata
 
 import (
+	"slices"
+
 	"go.opentelemetry.io/collector/component"
+	"go.opentelemetry.io/collector/pipeline"
 )
 
 var (
@@ -1752,9 +1755,9 @@ const (
 // DeprecationNotes can be embedded in the factory to include migration guidance in the startup log.
 type DeprecationNotes struct{}
 
-func (DeprecationNotes) DeprecationMessage(stabilityKey string) string {
-	switch stabilityKey {
-	case "logs":
+func (DeprecationNotes) DeprecationMessage(signals ...pipeline.Signal) string {
+	switch {
+	case slices.Equal(signals, []pipeline.Signal{pipeline.SignalLogs}):
 		return "Use \"bar\" for logs."
 	}
 	return ""
@@ -1838,6 +1841,30 @@ const (
 			actual, err := os.ReadFile(filepath.Clean(filepath.Join(tmpdir, "generated_status.go")))
 			require.NoError(t, err)
 			require.Equal(t, tt.expected, string(actual))
+		})
+	}
+}
+
+func TestGenerateDeprecationSignalRoutes(t *testing.T) {
+	for _, tt := range []struct {
+		class, key, signals string
+	}{
+		{"connector", "profiles_to_traces", "xpipeline.SignalProfiles, pipeline.SignalTraces"},
+		{"connector", "traces_to_profiles", "pipeline.SignalTraces, xpipeline.SignalProfiles"},
+		{"extension", "extension", ""},
+	} {
+		t.Run(tt.key, func(t *testing.T) {
+			md := Metadata{Type: "sample", Status: &Status{
+				Class:       tt.class,
+				Stability:   StabilityMap{component.StabilityLevelDeprecated: {tt.key}},
+				Deprecation: DeprecationMap{tt.key: {Migration: "Use the replacement."}},
+			}}
+			path := filepath.Join(t.TempDir(), "generated_status.go")
+			require.NoError(t, generateFile("templates/status.go.tmpl", path, md, "metadata", "go.opentelemetry.io/collector"))
+			src, err := os.ReadFile(filepath.Clean(path))
+			require.NoError(t, err)
+			require.Contains(t, string(src), "slices.Equal(signals, []pipeline.Signal{"+tt.signals+"})")
+			require.Equal(t, tt.class == "connector", strings.Contains(string(src), `"go.opentelemetry.io/collector/pipeline/xpipeline"`))
 		})
 	}
 }

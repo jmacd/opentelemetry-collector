@@ -5,10 +5,20 @@
 package {{ .Package }}
 
 import (
+	{{- if .Status.Deprecation }}
+	"slices"
+
+	{{ end -}}
 	"go.opentelemetry.io/collector/component"
 	{{- if and isExporter (not .SendingQueue.IsOmitted) }}
 	"go.opentelemetry.io/collector/config/configoptional"
 	"go.opentelemetry.io/collector/exporter/exporterhelper"
+	{{- end }}
+	{{- if .Status.Deprecation }}
+	"go.opentelemetry.io/collector/pipeline"
+	{{- if .Status.Deprecation.UsesProfiles }}
+	"go.opentelemetry.io/collector/pipeline/xpipeline"
+	{{- end }}
 	{{- end }}
 )
 
@@ -32,10 +42,11 @@ const (
 // DeprecationNotes can be embedded in the factory to include migration guidance in the startup log.
 type DeprecationNotes struct{}
 
-func (DeprecationNotes) DeprecationMessage(stabilityKey string) string {
-	switch stabilityKey {
+func (DeprecationNotes) DeprecationMessage(signals ...pipeline.Signal) string {
+	switch {
 	{{- range $key, $info := .Status.Deprecation }}
-	case {{ printf "%q" $key }}:
+	{{- $signals := deprecationSignalRefs $key }}
+	case slices.Equal(signals, []pipeline.Signal{ {{- stringsJoin $signals ", " -}} }):
 		return {{ printf "%q" (trimRight $info.Migration "\r\n") }}
 	{{- end }}
 	}
