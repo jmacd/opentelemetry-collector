@@ -59,6 +59,7 @@ type DeprecationMap map[string]DeprecationInfo
 type DeprecationInfo struct {
 	Date      string `mapstructure:"date"`
 	Migration string `mapstructure:"migration"`
+	Level     string `mapstructure:"level"`
 }
 
 var validClasses = []string{
@@ -161,6 +162,10 @@ func (s *Status) validateClass() error {
 
 type StabilityMap map[component.StabilityLevel][]string
 
+func (ms StabilityMap) Deprecated() []string {
+	return ms[component.StabilityLevelDeprecated]
+}
+
 func (ms StabilityMap) Validate() error {
 	var errs error
 	if len(ms) == 0 {
@@ -181,27 +186,24 @@ func (ms StabilityMap) Validate() error {
 
 func (dm DeprecationMap) Validate(ms StabilityMap) error {
 	var errs error
-	for stability, cmps := range ms {
-		if stability != component.StabilityLevelDeprecated {
+	for _, c := range ms.Deprecated() {
+		depInfo, found := dm[c]
+		if !found {
+			errs = errors.Join(errs, fmt.Errorf("deprecated component missing deprecation date and migration guide for %v", c))
 			continue
 		}
-		for _, c := range cmps {
-			depInfo, found := dm[c]
-			if !found {
-				errs = errors.Join(errs, fmt.Errorf("deprecated component missing deprecation date and migration guide for %v", c))
-				continue
-			}
-			if depInfo.Migration == "" {
-				errs = errors.Join(errs, fmt.Errorf("deprecated component missing migration guide: %v", c))
-			}
-			if depInfo.Date == "" {
-				errs = errors.Join(errs, fmt.Errorf("deprecated component missing date in YYYY-MM-DD format: %v", c))
-			} else {
-				_, err := time.Parse("2006-01-02", depInfo.Date)
-				if err != nil {
-					errs = errors.Join(errs, fmt.Errorf("deprecated component missing valid date in YYYY-MM-DD format: %v", c))
-				}
-			}
+		if depInfo.Migration == "" {
+			errs = errors.Join(errs, fmt.Errorf("deprecated component missing migration guide: %v", c))
+		}
+		if depInfo.Date == "" {
+			errs = errors.Join(errs, fmt.Errorf("deprecated component missing date in YYYY-MM-DD format: %v", c))
+		} else if _, err := time.Parse("2006-01-02", depInfo.Date); err != nil {
+			errs = errors.Join(errs, fmt.Errorf("deprecated component missing valid date in YYYY-MM-DD format: %v", c))
+		}
+		switch depInfo.Level {
+		case "", "debug", "info", "warn", "error":
+		default:
+			errs = errors.Join(errs, fmt.Errorf("invalid deprecation level %q for %s: expected debug, info, warn, or error", depInfo.Level, c))
 		}
 	}
 	return errs

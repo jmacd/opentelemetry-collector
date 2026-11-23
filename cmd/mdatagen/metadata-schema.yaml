@@ -67,6 +67,7 @@ status:
     <component>:
       date: string
       migration: string
+      level: <debug|info|warn|error> # Optional: severity of the migration notice; defaults to warn.
   # Optional: The distributions that this component is bundled with (For example core or contrib). See statusdata.go for a list of common distros.
   distributions: [string]
   # Optional: A list of warnings that should be brought to the attention of users looking to use this component

@@ -1714,12 +1714,17 @@ func TestGenerateStatusMetadata(t *testing.T) {
 		expected string
 	}{
 		{
-			name: "foo component with beta status",
+			name: "foo component with deprecated signals",
 			md: Metadata{
 				Type: "foo",
 				Status: &Status{
 					Stability: map[component.StabilityLevel][]string{
-						component.StabilityLevelBeta: {"metrics"},
+						component.StabilityLevelBeta:       {"metrics"},
+						component.StabilityLevelDeprecated: {"logs", "traces"},
+					},
+					Deprecation: DeprecationMap{
+						"logs":   {Migration: "Use \"bar\" for logs.\n"},
+						"traces": {Migration: "Use bar for traces.", Level: "info"},
 					},
 					Distributions: []string{"contrib"},
 					Class:         "receiver",
@@ -1732,6 +1737,8 @@ func TestGenerateStatusMetadata(t *testing.T) {
 package metadata
 
 import (
+	"go.uber.org/zap"
+
 	"go.opentelemetry.io/collector/component"
 )
 
@@ -1741,8 +1748,20 @@ var (
 )
 
 const (
+	LogsStability    = component.StabilityLevelDeprecated
+	TracesStability  = component.StabilityLevelDeprecated
 	MetricsStability = component.StabilityLevelBeta
 )
+
+// LogDeprecationForLogs logs the migration guidance for logs.
+func LogDeprecationForLogs(logger *zap.Logger) {
+	logger.Warn("Deprecation notice for logs: Use \"bar\" for logs.")
+}
+
+// LogDeprecationForTraces logs the migration guidance for traces.
+func LogDeprecationForTraces(logger *zap.Logger) {
+	logger.Info("Deprecation notice for traces: Use bar for traces.")
+}
 `,
 		},
 		{
