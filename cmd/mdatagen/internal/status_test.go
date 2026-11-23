@@ -11,10 +11,14 @@ import (
 	"go.opentelemetry.io/collector/component"
 )
 
-func TestDeprecationRejectsFatalLevel(t *testing.T) {
-	dm := DeprecationMap{"logs": {Date: "2025-02-05", Migration: "Use another receiver.", Level: "fatal"}}
-	err := dm.Validate(StabilityMap{component.StabilityLevelDeprecated: {"logs"}})
-	assert.EqualError(t, err, `invalid deprecation level "fatal" for logs: expected debug, info, warn, or error`)
+func TestDeprecationNoticeValidation(t *testing.T) {
+	dm := DeprecationMap{
+		"logs":   {Date: "2025-02-05", Migration: "Use another receiver.", Level: "fatal"},
+		"traces": {Date: "2025-02-05", Migration: " \r\n"},
+	}
+	err := dm.Validate(StabilityMap{component.StabilityLevelDeprecated: {"traces"}})
+	assert.ErrorContains(t, err, `deprecation of logs: invalid deprecation level "fatal"`)
+	assert.ErrorContains(t, err, "missing migration guide: traces")
 }
 
 func TestDistroURL(t *testing.T) {

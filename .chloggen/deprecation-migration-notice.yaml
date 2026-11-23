@@ -2,4 +2,4 @@ change_type: enhancement
 component: cmd/mdatagen
 note: Generate opt-in logging helpers for component migration guidance, with WARN as the default severity.
 issues: [12022]
-change_logs: [user, api]
+change_logs: [api]

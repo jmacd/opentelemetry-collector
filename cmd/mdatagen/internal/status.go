@@ -4,10 +4,12 @@
 package internal // import "go.opentelemetry.io/collector/cmd/mdatagen/internal"
 
 import (
+	"cmp"
 	"errors"
 	"fmt"
 	"slices"
 	"sort"
+	"strings"
 	"time"
 
 	"go.opentelemetry.io/collector/component"
@@ -60,6 +62,15 @@ type DeprecationInfo struct {
 	Date      string `mapstructure:"date"`
 	Migration string `mapstructure:"migration"`
 	Level     string `mapstructure:"level"`
+}
+
+func (d DeprecationInfo) LogLevel() (string, error) {
+	level := cmp.Or(d.Level, "warn")
+	levels := []string{"debug", "info", "warn", "error"}
+	if !slices.Contains(levels, level) {
+		return "", fmt.Errorf("invalid deprecation level %q: expected one of %s", level, strings.Join(levels, ", "))
+	}
+	return level, nil
 }
 
 var validClasses = []string{
@@ -186,24 +197,32 @@ func (ms StabilityMap) Validate() error {
 
 func (dm DeprecationMap) Validate(ms StabilityMap) error {
 	var errs error
-	for _, c := range ms.Deprecated() {
-		depInfo, found := dm[c]
-		if !found {
-			errs = errors.Join(errs, fmt.Errorf("deprecated component missing deprecation date and migration guide for %v", c))
+	for c, info := range dm {
+		if _, err := info.LogLevel(); err != nil {
+			errs = errors.Join(errs, fmt.Errorf("deprecation of %s: %w", c, err))
+		}
+	}
+	for stability, cmps := range ms {
+		if stability != component.StabilityLevelDeprecated {
 			continue
 		}
-		if depInfo.Migration == "" {
-			errs = errors.Join(errs, fmt.Errorf("deprecated component missing migration guide: %v", c))
-		}
-		if depInfo.Date == "" {
-			errs = errors.Join(errs, fmt.Errorf("deprecated component missing date in YYYY-MM-DD format: %v", c))
-		} else if _, err := time.Parse("2006-01-02", depInfo.Date); err != nil {
-			errs = errors.Join(errs, fmt.Errorf("deprecated component missing valid date in YYYY-MM-DD format: %v", c))
-		}
-		switch depInfo.Level {
-		case "", "debug", "info", "warn", "error":
-		default:
-			errs = errors.Join(errs, fmt.Errorf("invalid deprecation level %q for %s: expected debug, info, warn, or error", depInfo.Level, c))
+		for _, c := range cmps {
+			depInfo, found := dm[c]
+			if !found {
+				errs = errors.Join(errs, fmt.Errorf("deprecated component missing deprecation date and migration guide for %v", c))
+				continue
+			}
+			if strings.TrimSpace(depInfo.Migration) == "" {
+				errs = errors.Join(errs, fmt.Errorf("deprecated component missing migration guide: %v", c))
+			}
+			if depInfo.Date == "" {
+				errs = errors.Join(errs, fmt.Errorf("deprecated component missing date in YYYY-MM-DD format: %v", c))
+			} else {
+				_, err := time.Parse("2006-01-02", depInfo.Date)
+				if err != nil {
+					errs = errors.Join(errs, fmt.Errorf("deprecated component missing valid date in YYYY-MM-DD format: %v", c))
+				}
+			}
 		}
 	}
 	return errs

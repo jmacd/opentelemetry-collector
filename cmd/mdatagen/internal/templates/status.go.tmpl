@@ -34,9 +34,11 @@ const (
 
 {{ range $key := .Status.Stability.Deprecated -}}
 {{ $info := index $.Status.Deprecation $key -}}
-// LogDeprecationFor{{ toCamelCase $key }} logs the migration guidance for {{ $key }}.
-func LogDeprecationFor{{ toCamelCase $key }}(logger *zap.Logger) {
-	logger.{{ casesTitle (or $info.Level "warn") }}({{ printf "Deprecation notice for %s: %s" $key (trimRight $info.Migration "\r\n") | printf "%q" }})
+{{ $name := printf "LogDeprecationFor%s" (toCamelCase $key) -}}
+{{ $message := printf "Deprecation notice for %s: %s" $key (trimRight $info.Migration "\r\n") -}}
+// {{ $name }} logs the migration guidance for {{ $key }}.
+func {{ $name }}(logger *zap.Logger) {
+	logger.{{ casesTitle $info.LogLevel }}({{ printf "%q" $message }})
 }
 
 {{ end -}}

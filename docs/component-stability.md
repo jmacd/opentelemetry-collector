@@ -339,11 +339,10 @@ When a component is moved to deprecated, a deprecation section should indicate t
 as well as any migration guidance. In some occasions might not be offered migration guidance but reviewers should
 explicitly agree on this, and use a "No migration is offered for this component" hint.
 
-To log the migration guidance at startup, call the generated helper from the
-matching factory create function, for example `metadata.LogDeprecationForLogs(set.Logger)`
-for logs or `metadata.LogDeprecationForTracesToMetrics(set.Logger)` for a connector
-route. The notice defaults to `warn`. Set `level` beside `migration` in the
-signal's `status.deprecation` entry to select `debug`, `info`, `warn`, or `error`.
+To log this guidance at startup, call the generated helper in the create function
+for the deprecated signal or connector route, for example `metadata.LogDeprecationForTracesToMetrics(set.Logger)`.
+The notice defaults to `warn`. To override it, set `level` to `debug`, `info`, or `error`
+beside `migration` in the corresponding `metadata.yaml` entry.
 
 ## Versioning
 

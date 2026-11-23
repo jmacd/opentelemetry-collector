@@ -1714,17 +1714,12 @@ func TestGenerateStatusMetadata(t *testing.T) {
 		expected string
 	}{
 		{
-			name: "foo component with deprecated signals",
+			name: "foo component with beta status",
 			md: Metadata{
 				Type: "foo",
 				Status: &Status{
 					Stability: map[component.StabilityLevel][]string{
-						component.StabilityLevelBeta:       {"metrics"},
-						component.StabilityLevelDeprecated: {"logs", "traces"},
-					},
-					Deprecation: DeprecationMap{
-						"logs":   {Migration: "Use \"bar\" for logs.\n"},
-						"traces": {Migration: "Use bar for traces.", Level: "info"},
+						component.StabilityLevelBeta: {"metrics"},
 					},
 					Distributions: []string{"contrib"},
 					Class:         "receiver",
@@ -1737,8 +1732,6 @@ func TestGenerateStatusMetadata(t *testing.T) {
 package metadata
 
 import (
-	"go.uber.org/zap"
-
 	"go.opentelemetry.io/collector/component"
 )
 
@@ -1748,20 +1741,8 @@ var (
 )
 
 const (
-	LogsStability    = component.StabilityLevelDeprecated
-	TracesStability  = component.StabilityLevelDeprecated
 	MetricsStability = component.StabilityLevelBeta
 )
-
-// LogDeprecationForLogs logs the migration guidance for logs.
-func LogDeprecationForLogs(logger *zap.Logger) {
-	logger.Warn("Deprecation notice for logs: Use \"bar\" for logs.")
-}
-
-// LogDeprecationForTraces logs the migration guidance for traces.
-func LogDeprecationForTraces(logger *zap.Logger) {
-	logger.Info("Deprecation notice for traces: Use bar for traces.")
-}
 `,
 		},
 		{
@@ -1843,6 +1824,27 @@ const (
 			require.Equal(t, tt.expected, string(actual))
 		})
 	}
+}
+
+func TestGenerateDeprecationNotices(t *testing.T) {
+	md := Metadata{Status: &Status{
+		Class: "connector",
+		Stability: StabilityMap{
+			component.StabilityLevelDeprecated: {"traces_to_metrics", "metrics_to_logs"},
+			component.StabilityLevelBeta:       {"logs_to_logs"},
+		},
+		Deprecation: DeprecationMap{
+			"traces_to_metrics": {Migration: "Use \"bar\".\r\n"},
+			"metrics_to_logs":   {Migration: "Use foo.", Level: "info"},
+		},
+	}}
+	src, err := executeTemplate("templates/status.go.tmpl", md, "metadata", "", getTemplateFuncMap(md, ""))
+	require.NoError(t, err)
+	code := string(src)
+	assert.Contains(t, code, "func LogDeprecationForTracesToMetrics(")
+	assert.Contains(t, code, `logger.Warn("Deprecation notice for traces_to_metrics: Use \"bar\".")`)
+	assert.Contains(t, code, `logger.Info("Deprecation notice for metrics_to_logs: Use foo.")`)
+	assert.NotContains(t, code, "LogDeprecationForLogsToLogs")
 }
 
 func TestGenerateTelemetryMetadata(t *testing.T) {
