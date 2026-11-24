@@ -133,6 +133,7 @@ func NewCollector(set CollectorSettings) (*Collector, error) {
 	logger := zap.New(cc, options...)
 	set.ConfigProviderSettings.ResolverSettings.ProviderSettings = confmap.ProviderSettings{Logger: logger}
 	set.ConfigProviderSettings.ResolverSettings.ConverterSettings = confmap.ConverterSettings{Logger: logger}
+	bindConfigDeprecations(&set)
 
 	configProvider, err := NewConfigProvider(set.ConfigProviderSettings)
 	if err != nil {

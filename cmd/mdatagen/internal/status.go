@@ -155,7 +155,7 @@ func (s *Status) Validate() error {
 			errs = errors.Join(errs, err)
 		}
 	}
-	if err := s.Deprecation.Validate(s.Stability); err != nil {
+	if err := s.validateDeprecation(); err != nil {
 		errs = errors.Join(errs, err)
 	}
 	return errs
@@ -172,10 +172,6 @@ func (s *Status) validateClass() error {
 }
 
 type StabilityMap map[component.StabilityLevel][]string
-
-func (ms StabilityMap) Deprecated() []string {
-	return ms[component.StabilityLevelDeprecated]
-}
 
 func (ms StabilityMap) Validate() error {
 	var errs error
@@ -195,35 +191,49 @@ func (ms StabilityMap) Validate() error {
 	return errs
 }
 
-func (dm DeprecationMap) Validate(ms StabilityMap) error {
+func (s *Status) validateDeprecation() error {
 	var errs error
-	for c, info := range dm {
+	deprecated := s.Stability[component.StabilityLevelDeprecated]
+	for _, c := range deprecated {
+		if _, ok := s.Deprecation[c]; !ok {
+			errs = errors.Join(errs, fmt.Errorf("deprecated component missing deprecation date and migration guide for %v", c))
+		}
+	}
+	for c, info := range s.Deprecation {
+		if !slices.Contains(deprecated, c) {
+			errs = errors.Join(errs, fmt.Errorf("deprecation of %q: not listed in stability.deprecated", c))
+			continue
+		}
+		if !s.validDeprecationTarget(c) {
+			errs = errors.Join(errs, fmt.Errorf("invalid deprecated component: %q", c))
+			continue
+		}
 		if _, err := info.LogLevel(); err != nil {
 			errs = errors.Join(errs, fmt.Errorf("deprecation of %s: %w", c, err))
 		}
-	}
-	for stability, cmps := range ms {
-		if stability != component.StabilityLevelDeprecated {
-			continue
+		if strings.TrimSpace(info.Migration) == "" {
+			errs = errors.Join(errs, fmt.Errorf("deprecated component missing migration guide: %v", c))
 		}
-		for _, c := range cmps {
-			depInfo, found := dm[c]
-			if !found {
-				errs = errors.Join(errs, fmt.Errorf("deprecated component missing deprecation date and migration guide for %v", c))
-				continue
-			}
-			if strings.TrimSpace(depInfo.Migration) == "" {
-				errs = errors.Join(errs, fmt.Errorf("deprecated component missing migration guide: %v", c))
-			}
-			if depInfo.Date == "" {
-				errs = errors.Join(errs, fmt.Errorf("deprecated component missing date in YYYY-MM-DD format: %v", c))
-			} else {
-				_, err := time.Parse("2006-01-02", depInfo.Date)
-				if err != nil {
-					errs = errors.Join(errs, fmt.Errorf("deprecated component missing valid date in YYYY-MM-DD format: %v", c))
-				}
-			}
+		if info.Date == "" {
+			errs = errors.Join(errs, fmt.Errorf("deprecated component missing date in YYYY-MM-DD format: %v", c))
+		} else if _, err := time.Parse(time.DateOnly, info.Date); err != nil {
+			errs = errors.Join(errs, fmt.Errorf("deprecated component missing valid date in YYYY-MM-DD format: %v", c))
 		}
 	}
 	return errs
+}
+
+func (s *Status) validDeprecationTarget(target string) bool {
+	switch s.Class {
+	case "converter", "extension", "provider":
+		return target == s.Class
+	case "connector":
+		return slices.Contains(validStabilityKeys, target) && strings.Contains(target, "_to_")
+	case "scraper":
+		return target == "logs" || target == "metrics" || target == "profiles"
+	case "exporter", "processor", "receiver":
+		return target == "traces" || target == "metrics" || target == "logs" || target == "profiles"
+	default:
+		return target == s.Class || slices.Contains(validStabilityKeys, target)
+	}
 }

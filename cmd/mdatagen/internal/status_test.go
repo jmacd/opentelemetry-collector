@@ -7,18 +7,26 @@ import (
 	"testing"
 
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 
 	"go.opentelemetry.io/collector/component"
 )
 
 func TestDeprecationNoticeValidation(t *testing.T) {
-	dm := DeprecationMap{
-		"logs":   {Date: "2025-02-05", Migration: "Use another receiver.", Level: "fatal"},
-		"traces": {Date: "2025-02-05", Migration: " \r\n"},
+	s := Status{
+		Class:     "provider",
+		Stability: StabilityMap{component.StabilityLevelDeprecated: {"provider", "unknown"}},
+		Deprecation: DeprecationMap{
+			"provider": {Date: "2025-02-05", Migration: " \r\n", Level: "fatal"},
+			"unknown":  {},
+			"logs":     {},
+		},
 	}
-	err := dm.Validate(StabilityMap{component.StabilityLevelDeprecated: {"traces"}})
-	assert.ErrorContains(t, err, `deprecation of logs: invalid deprecation level "fatal"`)
-	assert.ErrorContains(t, err, "missing migration guide: traces")
+	err := s.Validate()
+	require.ErrorContains(t, err, `deprecation of provider: invalid deprecation level "fatal"`)
+	require.ErrorContains(t, err, "missing migration guide: provider")
+	require.ErrorContains(t, err, `invalid deprecated component: "unknown"`)
+	require.ErrorContains(t, err, `deprecation of "logs": not listed in stability.deprecated`)
 }
 
 func TestDistroURL(t *testing.T) {

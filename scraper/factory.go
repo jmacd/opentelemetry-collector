@@ -7,6 +7,7 @@ import (
 	"context"
 
 	"go.opentelemetry.io/collector/component"
+	"go.opentelemetry.io/collector/component/componentdeprecation"
 	"go.opentelemetry.io/collector/pipeline"
 )
 
@@ -92,6 +93,7 @@ func (f *factory) CreateLogs(ctx context.Context, set Settings, cfg component.Co
 	if f.createLogsFunc == nil {
 		return nil, pipeline.ErrSignalNotSupported
 	}
+	componentdeprecation.Log(set.Logger, "scraper", f.Type().String(), "logs")
 	return f.createLogsFunc(ctx, set, cfg)
 }
 
@@ -99,6 +101,7 @@ func (f *factory) CreateMetrics(ctx context.Context, set Settings, cfg component
 	if f.createMetricsFunc == nil {
 		return nil, pipeline.ErrSignalNotSupported
 	}
+	componentdeprecation.Log(set.Logger, "scraper", f.Type().String(), "metrics")
 	return f.createMetricsFunc(ctx, set, cfg)
 }
 

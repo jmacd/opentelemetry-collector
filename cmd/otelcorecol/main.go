@@ -16,6 +16,15 @@ import (
 	"go.opentelemetry.io/collector/otelcol"
 )
 
+type configFactoryPackage string
+
+func (p configFactoryPackage) ConfigFactoryPackage() string { return string(p) }
+
+type providerFactory struct {
+	confmap.ProviderFactory
+	configFactoryPackage
+}
+
 func main() {
 	info := component.BuildInfo{
 		Command:     "otelcorecol",
@@ -29,11 +38,11 @@ func main() {
 		ConfigProviderSettings: otelcol.ConfigProviderSettings{
 			ResolverSettings: confmap.ResolverSettings{
 				ProviderFactories: []confmap.ProviderFactory{
-					envprovider.NewFactory(),
-					fileprovider.NewFactory(),
-					httpprovider.NewFactory(),
-					httpsprovider.NewFactory(),
-					yamlprovider.NewFactory(),
+					providerFactory{envprovider.NewFactory(), "go.opentelemetry.io/collector/confmap/provider/envprovider"},
+					providerFactory{fileprovider.NewFactory(), "go.opentelemetry.io/collector/confmap/provider/fileprovider"},
+					providerFactory{httpprovider.NewFactory(), "go.opentelemetry.io/collector/confmap/provider/httpprovider"},
+					providerFactory{httpsprovider.NewFactory(), "go.opentelemetry.io/collector/confmap/provider/httpsprovider"},
+					providerFactory{yamlprovider.NewFactory(), "go.opentelemetry.io/collector/confmap/provider/yamlprovider"},
 				},
 			},
 		},

@@ -48,6 +48,7 @@ func TestLoadMetadata(t *testing.T) {
 				Description:          "This receiver is used for testing purposes to check the output of mdatagen.",
 				SemConvVersion:       "1.40.0",
 				PackageName:          "go.opentelemetry.io/collector/cmd/mdatagen/internal/samplereceiver",
+				goPackage:            "samplereceiver",
 				OverrideValueEnabled: true,
 				Status: &Status{
 					DisableCodeCov: true,
@@ -627,6 +628,7 @@ func TestLoadMetadata(t *testing.T) {
 			want: Metadata{
 				Type:                 "subcomponent",
 				Parent:               "parentComponent",
+				goPackage:            "testdata",
 				GeneratedPackageName: "metadata",
 				ScopeName:            "go.opentelemetry.io/collector/cmd/mdatagen/internal/testdata",
 				PackageName:          "go.opentelemetry.io/collector/cmd/mdatagen/internal/testdata",
@@ -640,6 +642,7 @@ func TestLoadMetadata(t *testing.T) {
 			want: Metadata{
 				Type:                 "custom",
 				GeneratedPackageName: "customname",
+				goPackage:            "testdata",
 				ScopeName:            "go.opentelemetry.io/collector/cmd/mdatagen/internal/testdata",
 				PackageName:          "go.opentelemetry.io/collector/cmd/mdatagen/internal/testdata",
 				ShortFolderName:      "testdata",
@@ -659,6 +662,7 @@ func TestLoadMetadata(t *testing.T) {
 		{
 			name: "testdata/empty_test_config.yaml",
 			want: Metadata{
+				goPackage:            "testdata",
 				Type:                 "test",
 				GeneratedPackageName: "metadata",
 				ScopeName:            "go.opentelemetry.io/collector/cmd/mdatagen/internal/testdata",
@@ -678,6 +682,7 @@ func TestLoadMetadata(t *testing.T) {
 		{
 			name: "testdata/reaggregation_disabled.yaml",
 			want: Metadata{
+				goPackage:            "testdata",
 				Type:                 "test",
 				GeneratedPackageName: "metadata",
 				ScopeName:            "go.opentelemetry.io/collector/cmd/mdatagen/internal/testdata",
@@ -771,6 +776,7 @@ func TestLoadMetadata(t *testing.T) {
 		{
 			name: "testdata/display_name.yaml",
 			want: Metadata{
+				goPackage:            "testdata",
 				Type:                 "test",
 				DisplayName:          "Test Receiver",
 				GeneratedPackageName: "metadata",
@@ -791,6 +797,7 @@ func TestLoadMetadata(t *testing.T) {
 		{
 			name: "testdata/no_display_name.yaml",
 			want: Metadata{
+				goPackage:            "testdata",
 				Type:                 "nodisplayname",
 				DisplayName:          "",
 				GeneratedPackageName: "metadata",
@@ -811,6 +818,7 @@ func TestLoadMetadata(t *testing.T) {
 		{
 			name: "testdata/with_description.yaml",
 			want: Metadata{
+				goPackage:            "testdata",
 				Type:                 "testdesc",
 				DisplayName:          "Test Component",
 				Description:          "This is a test component with a description.",
@@ -832,6 +840,7 @@ func TestLoadMetadata(t *testing.T) {
 		{
 			name: "testdata/with_pipe_description.yaml",
 			want: Metadata{
+				goPackage:            "testdata",
 				Type:                 "testdesc",
 				DisplayName:          "Test Component",
 				Description:          "This is a test component with a multiline description.\nIt has a second line.\n",
@@ -853,6 +862,7 @@ func TestLoadMetadata(t *testing.T) {
 		{
 			name: "testdata/with_underscore_in_semconv_ref_anchor_tag.yaml",
 			want: Metadata{
+				goPackage:            "testdata",
 				Type:                 "metricreceiver",
 				GeneratedPackageName: "metadata",
 				SemConvVersion:       "1.40.0",

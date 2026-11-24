@@ -5,10 +5,6 @@
 package {{ .Package }}
 
 import (
-	{{- if .Status.Stability.Deprecated }}
-	"go.uber.org/zap"
-
-	{{ end -}}
 	"go.opentelemetry.io/collector/component"
 	{{- if and isExporter (not .SendingQueue.IsOmitted) }}
 	"go.opentelemetry.io/collector/config/configoptional"
@@ -31,17 +27,6 @@ const (
 	{{- end }}
 	{{- end }}
 )
-
-{{ range $key := .Status.Stability.Deprecated -}}
-{{ $info := index $.Status.Deprecation $key -}}
-{{ $name := printf "LogDeprecationFor%s" (toCamelCase $key) -}}
-{{ $message := printf "Deprecation notice for %s: %s" $key (trimRight $info.Migration "\r\n") -}}
-// {{ $name }} logs the migration guidance for {{ $key }}.
-func {{ $name }}(logger *zap.Logger) {
-	logger.{{ casesTitle $info.LogLevel }}({{ printf "%q" $message }})
-}
-
-{{ end -}}
 
 {{ if and isExporter (not .SendingQueue.IsOmitted) -}}
 // NewDefaultSendingQueueConfig returns the sending queue default declared in metadata.yaml.

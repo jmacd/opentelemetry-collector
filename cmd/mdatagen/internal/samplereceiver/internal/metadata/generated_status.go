@@ -5,8 +5,6 @@
 package metadata
 
 import (
-	"go.uber.org/zap"
-
 	"go.opentelemetry.io/collector/component"
 )
 
@@ -21,8 +19,3 @@ const (
 	TracesStability   = component.StabilityLevelBeta
 	MetricsStability  = component.StabilityLevelStable
 )
-
-// LogDeprecationForProfiles logs the migration guidance for profiles.
-func LogDeprecationForProfiles(logger *zap.Logger) {
-	logger.Warn("Deprecation notice for profiles: no migration needed")
-}

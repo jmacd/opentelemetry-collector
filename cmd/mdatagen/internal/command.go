@@ -118,7 +118,6 @@ func run(ymlPath string) error {
 	}
 
 	ymlDir := filepath.Dir(ymlPath)
-	packageName := filepath.Base(ymlDir)
 	importRootPath, err := helpers.RootPackage(ymlDir)
 	if err != nil {
 		return fmt.Errorf("unable to determine import root path: %w", err)
@@ -148,11 +147,19 @@ func run(ymlPath string) error {
 
 	codeDir := filepath.Join(ymlDir, "internal", md.GeneratedPackageName)
 	toGenerate := map[string]string{}
+	noticeFile := filepath.Join(ymlDir, "generated_deprecation.go")
+	if md.Status != nil && len(md.Status.Deprecation) > 0 {
+		if genErr := generateFile(filepath.Join(tmplDir, "deprecation.go.tmpl"), noticeFile, md, md.goPackage, importRootPath); genErr != nil {
+			return genErr
+		}
+	} else if removeErr := os.Remove(noticeFile); removeErr != nil && !errors.Is(removeErr, fs.ErrNotExist) {
+		return removeErr
+	}
 	if md.Status != nil {
 		if !slices.Contains(nonComponents, md.Status.Class) {
 			toGenerate[filepath.Join(tmplDir, "status.go.tmpl")] = filepath.Join(codeDir, "generated_status.go")
 			err = generateFile(filepath.Join(tmplDir, "component_test.go.tmpl"),
-				filepath.Join(ymlDir, "generated_component_test.go"), md, packageName, importRootPath)
+				filepath.Join(ymlDir, "generated_component_test.go"), md, md.goPackage, importRootPath)
 			if err != nil {
 				return err
 			}
@@ -172,7 +179,7 @@ func run(ymlPath string) error {
 		}
 
 		err = generateFile(filepath.Join(tmplDir, "package_test.go.tmpl"),
-			filepath.Join(ymlDir, "generated_package_test.go"), md, packageName, importRootPath)
+			filepath.Join(ymlDir, "generated_package_test.go"), md, md.goPackage, importRootPath)
 		if err != nil {
 			return err
 		}

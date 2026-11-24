@@ -10,8 +10,11 @@ import (
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	"go.uber.org/zap"
+	"go.uber.org/zap/zaptest/observer"
 
 	"go.opentelemetry.io/collector/component"
+	"go.opentelemetry.io/collector/component/componentdeprecation"
 	"go.opentelemetry.io/collector/component/componenttest"
 	"go.opentelemetry.io/collector/connector"
 	"go.opentelemetry.io/collector/connector/connectortest"
@@ -24,6 +27,28 @@ import (
 	"go.opentelemetry.io/collector/pipeline/xpipeline"
 	"go.opentelemetry.io/collector/service/internal/builders"
 )
+
+func TestConnectorDeprecationNotice(t *testing.T) {
+	id := component.MustNewIDWithName("deprecatedroutes", "instance")
+	componentdeprecation.MustRegister("connector", id.Type().String(), "traces_to_metrics", zap.WarnLevel, "Use the replacement.")
+	f := connector.NewFactory(id.Type(), nil,
+		connector.WithTracesToMetrics(createConnectorTracesToMetrics, component.StabilityLevelBeta),
+		connector.WithMetricsToTraces(createConnectorMetricsToTraces, component.StabilityLevelDeprecated),
+	)
+	b := builders.NewConnector(map[component.ID]component.Config{id: struct{}{}}, map[component.Type]connector.Factory{id.Type(): f})
+	core, logs := observer.New(zap.DebugLevel)
+	set := createConnectorSettings(id)
+	set.Logger = zap.New(core)
+	_, err := b.CreateMetricsToTraces(t.Context(), set, consumertest.NewNop())
+	require.NoError(t, err)
+	_, err = b.CreateTracesToMetrics(t.Context(), set, consumertest.NewNop())
+	require.NoError(t, err)
+	entries := logs.All()
+	require.Len(t, entries, 2)
+	assert.Equal(t, component.StabilityLevelDeprecated.LogMessage(), entries[0].Message)
+	assert.Equal(t, "Deprecation notice for traces_to_metrics: Use the replacement.", entries[1].Message)
+	assert.Equal(t, zap.WarnLevel, entries[1].Level)
+}
 
 func TestConnectorBuilder(t *testing.T) {
 	defaultCfg := struct{}{}

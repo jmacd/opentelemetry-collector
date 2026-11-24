@@ -339,8 +339,14 @@ When a component is moved to deprecated, a deprecation section should indicate t
 as well as any migration guidance. In some occasions might not be offered migration guidance but reviewers should
 explicitly agree on this, and use a "No migration is offered for this component" hint.
 
-To log this guidance at startup, call the generated helper in the create function
-for the deprecated signal or connector route, for example `metadata.LogDeprecationForTracesToMetrics(set.Logger)`.
+After editing `metadata.yaml`, regenerate the component. The Collector logs the migration guidance
+when it creates the deprecated receiver, processor, exporter, connector route, extension, or scraper.
+Only the selected signal or route emits its notice. Component authors do not need to edit their factories.
+Config providers log on their first retrieval and converters on their first conversion. The Collector
+Builder supplies their Go package identity. Hand-built distributions can supply `ProviderModules`
+and `ConverterModules` for module-root factories, or expose `ConfigFactoryPackage() string`
+on the factory registration for a subpackage. Packages without
+a Collector-managed lifecycle get a `LogDeprecationFor...` helper for use with their own logger.
 The notice defaults to `warn`; `level` can override it with `debug`, `info`, or `error`.
 For example, this `metadata.yaml` excerpt logs the traces-to-metrics migration notice at `info`:
 

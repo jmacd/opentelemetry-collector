@@ -10,6 +10,7 @@ import (
 	"go.uber.org/zap"
 
 	"go.opentelemetry.io/collector/component"
+	"go.opentelemetry.io/collector/component/componentdeprecation"
 	"go.opentelemetry.io/collector/internal/componentalias"
 )
 
@@ -18,10 +19,12 @@ var (
 	NopType            = component.MustNewType("nop")
 )
 
-// logStabilityLevel logs the stability level of a component. The log level is set to info for
-// undefined, unmaintained, deprecated and development. The log level is set to debug
-// for alpha, beta and stable.
-func logStabilityLevel(logger *zap.Logger, sl component.StabilityLevel) {
+// A registered migration notice replaces the generic deprecated status message.
+// Other components retain their usual stability logging.
+func logStabilityLevel(logger *zap.Logger, sl component.StabilityLevel, class string, factory component.Factory, target string) {
+	if componentdeprecation.Log(logger, class, factory.Type().String(), target) {
+		return
+	}
 	if sl >= component.StabilityLevelAlpha {
 		logger.Debug(sl.LogMessage())
 	} else {

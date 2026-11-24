@@ -1827,7 +1827,7 @@ const (
 }
 
 func TestGenerateDeprecationNotices(t *testing.T) {
-	md := Metadata{Status: &Status{
+	md := Metadata{Type: "sample", Status: &Status{
 		Class: "connector",
 		Stability: StabilityMap{
 			component.StabilityLevelDeprecated: {"traces_to_metrics", "metrics_to_logs"},
@@ -1838,13 +1838,42 @@ func TestGenerateDeprecationNotices(t *testing.T) {
 			"metrics_to_logs":   {Migration: "Use foo.", Level: "info"},
 		},
 	}}
-	src, err := executeTemplate("templates/status.go.tmpl", md, "metadata", "", getTemplateFuncMap(md, ""))
+	src, err := executeTemplate("templates/deprecation.go.tmpl", md, "metadata", "", getTemplateFuncMap(md, ""))
 	require.NoError(t, err)
 	code := string(src)
-	assert.Contains(t, code, "func LogDeprecationForTracesToMetrics(")
-	assert.Contains(t, code, `logger.Warn("Deprecation notice for traces_to_metrics: Use \"bar\".")`)
-	assert.Contains(t, code, `logger.Info("Deprecation notice for metrics_to_logs: Use foo.")`)
-	assert.NotContains(t, code, "LogDeprecationForLogsToLogs")
+	assert.Contains(t, code, `componentdeprecation.MustRegister("connector", "sample", "traces_to_metrics", zap.WarnLevel, "Use \"bar\".")`)
+	assert.Contains(t, code, `componentdeprecation.MustRegister("connector", "sample", "metrics_to_logs", zap.InfoLevel, "Use foo.")`)
+	assert.NotContains(t, code, "logs_to_logs")
+}
+
+func TestRunProviderDeprecationNotice(t *testing.T) {
+	dir := newTestModuleDir(t)
+	require.NoError(t, os.WriteFile(filepath.Join(dir, "doc.go"), []byte("package legacy"), 0o600))
+	path := filepath.Join(dir, "metadata.yaml")
+	const provider = "type: sample\nstatus:\n  class: provider\n"
+	const notice = `  stability:
+    deprecated: [provider]
+  deprecation:
+    provider:
+      date: "2025-02-05"
+      migration: Use the new provider.
+`
+	require.NoError(t, os.WriteFile(path, []byte(provider+notice+"      severity: info\n"), 0o600))
+	require.ErrorContains(t, run(path), "severity")
+
+	require.NoError(t, os.WriteFile(path, []byte(provider+notice+"      level: info\n"), 0o600))
+	require.NoError(t, run(path))
+	metadataDir := filepath.Join(dir, "internal", "metadata")
+	noticeFile := filepath.Join(dir, "generated_deprecation.go")
+	code, err := os.ReadFile(filepath.Clean(noticeFile))
+	require.NoError(t, err)
+	assert.Contains(t, string(code), "package legacy\n")
+	assert.Contains(t, string(code), `componentdeprecation.MustRegister("provider", "go.opentelemetry.io/collector/shortname", "provider", zap.InfoLevel, "Use the new provider.")`)
+	assert.NoFileExists(t, filepath.Join(metadataDir, "generated_status.go"))
+
+	require.NoError(t, os.WriteFile(path, []byte(provider+"  stability:\n    stable: [provider]\n"), 0o600))
+	require.NoError(t, run(path))
+	assert.NoFileExists(t, noticeFile)
 }
 
 func TestGenerateTelemetryMetadata(t *testing.T) {

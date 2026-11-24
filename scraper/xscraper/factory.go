@@ -7,6 +7,7 @@ import (
 	"context"
 
 	"go.opentelemetry.io/collector/component"
+	"go.opentelemetry.io/collector/component/componentdeprecation"
 	"go.opentelemetry.io/collector/pipeline"
 	"go.opentelemetry.io/collector/scraper"
 )
@@ -54,6 +55,7 @@ func (f *factory) CreateProfiles(ctx context.Context, set scraper.Settings, cfg 
 	if f.createProfilesFunc == nil {
 		return nil, pipeline.ErrSignalNotSupported
 	}
+	componentdeprecation.Log(set.Logger, "scraper", f.Type().String(), "profiles")
 	return f.createProfilesFunc(ctx, set, cfg)
 }
 

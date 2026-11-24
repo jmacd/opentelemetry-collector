@@ -9,8 +9,11 @@ import (
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	"go.uber.org/zap"
+	"go.uber.org/zap/zaptest/observer"
 
 	"go.opentelemetry.io/collector/component"
+	"go.opentelemetry.io/collector/component/componentdeprecation"
 	"go.opentelemetry.io/collector/component/componenttest"
 	"go.opentelemetry.io/collector/pipeline"
 )
@@ -36,6 +39,23 @@ func TestNewFactory(t *testing.T) {
 	require.ErrorIs(t, err, pipeline.ErrSignalNotSupported)
 	_, err = f.CreateMetrics(context.Background(), nopSettings(), &defaultCfg)
 	require.ErrorIs(t, err, pipeline.ErrSignalNotSupported)
+}
+
+func TestScraperDeprecationOnUse(t *testing.T) {
+	typ := component.MustNewType("oldmetrics")
+	componentdeprecation.MustRegister("scraper", typ.String(), "metrics", zap.WarnLevel, "Use newmetrics.")
+	f := NewFactory(typ, nil, WithLogs(createLogs, component.StabilityLevelStable), WithMetrics(createMetrics, component.StabilityLevelDeprecated))
+	core, logs := observer.New(zap.DebugLevel)
+	set := nopSettings()
+	set.ID = component.NewID(typ)
+	set.Logger = zap.New(core)
+	_, err := f.CreateLogs(t.Context(), set, nil)
+	require.NoError(t, err)
+	assert.Zero(t, logs.Len())
+	_, err = f.CreateMetrics(t.Context(), set, nil)
+	require.NoError(t, err)
+	require.Len(t, logs.All(), 1)
+	assert.Equal(t, "Deprecation notice for metrics: Use newmetrics.", logs.All()[0].Message)
 }
 
 func TestNewFactoryWithOptions(t *testing.T) {

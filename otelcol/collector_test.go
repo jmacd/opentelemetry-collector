@@ -22,6 +22,7 @@ import (
 	"go.yaml.in/yaml/v3"
 
 	"go.opentelemetry.io/collector/component"
+	"go.opentelemetry.io/collector/component/componentdeprecation"
 	"go.opentelemetry.io/collector/component/componentstatus"
 	"go.opentelemetry.io/collector/confmap"
 	"go.opentelemetry.io/collector/connector/connectortest"
@@ -1775,6 +1776,49 @@ func newConfFromFile(tb testing.TB, fileName string) map[string]any {
 
 	return confmap.NewFromStringMap(data).ToStringMap()
 }
+
+func TestConfigDeprecationsLogOnFirstUse(t *testing.T) {
+	const importPath = "example.org/legacy"
+	componentdeprecation.MustRegister("provider", importPath, "provider", zap.WarnLevel, "Use the new provider.")
+	componentdeprecation.MustRegister("converter", importPath, "converter", zap.InfoLevel, "Remove the converter.")
+	core, logs := observer.New(zap.DebugLevel)
+	logger := zap.New(core)
+
+	conversions := 0
+	factory := confmap.NewConverterFactory(func(confmap.ConverterSettings) confmap.Converter {
+		return convertFunc(func(context.Context, *confmap.Conf) error {
+			conversions++
+			return nil
+		})
+	})
+	set := CollectorSettings{ProviderModules: map[string]string{"file": importPath + " v1.2.3"}}
+	rs := &set.ConfigProviderSettings.ResolverSettings
+	rs.ProviderFactories = []confmap.ProviderFactory{confmap.NewProviderFactory(newFailureProvider)}
+	rs.ConverterFactories = []confmap.ConverterFactory{namedTestConverter{factory}}
+	bindConfigDeprecations(&set)
+	p := rs.ProviderFactories[0].Create(confmap.ProviderSettings{Logger: logger})
+	c := rs.ConverterFactories[0].Create(confmap.ConverterSettings{Logger: logger})
+	assert.Zero(t, logs.Len())
+	for range 2 {
+		_, err := p.Retrieve(t.Context(), "file:config", nil)
+		require.ErrorContains(t, err, "failure occurred")
+		require.NoError(t, c.Convert(t.Context(), confmap.New()))
+	}
+	assert.Equal(t, 2, conversions)
+	entries := logs.All()
+	require.Len(t, entries, 2)
+	assert.Equal(t, "Deprecation notice for provider: Use the new provider.", entries[0].Message)
+	assert.Equal(t, "Deprecation notice for converter: Remove the converter.", entries[1].Message)
+	assert.Equal(t, zap.InfoLevel, entries[1].Level)
+}
+
+type namedTestConverter struct{ confmap.ConverterFactory }
+
+func (namedTestConverter) ConfigFactoryPackage() string { return "example.org/legacy" }
+
+type convertFunc func(context.Context, *confmap.Conf) error
+
+func (f convertFunc) Convert(ctx context.Context, cfg *confmap.Conf) error { return f(ctx, cfg) }
 
 func TestProviderAndConverterModules(t *testing.T) {
 	set := CollectorSettings{

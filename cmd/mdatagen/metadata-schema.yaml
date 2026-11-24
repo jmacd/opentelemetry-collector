@@ -64,7 +64,7 @@ status:
     unmaintained: [<metrics|traces|logs|traces_to_metrics|metrics_to_metrics|logs_to_metrics|extension,converter,provider>]
   # Required for deprecated components: The deprecation information for the deprecated components - See https://github.com/open-telemetry/opentelemetry-collector/blob/main/docs/component-stability.md#deprecation-information
   deprecation:
-    <component>:
+    <component>: # Must match an entry in stability.deprecated.
       date: string
       migration: string
       level: <debug|info|warn|error> # Optional: severity of the migration notice; defaults to warn.

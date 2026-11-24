@@ -17,6 +17,23 @@ import (
 	"go.opentelemetry.io/collector/otelcol"
 )
 
+type configFactoryPackage string
+
+func (p configFactoryPackage) ConfigFactoryPackage() string { return string(p) }
+
+type providerFactory struct {
+	confmap.ProviderFactory
+	configFactoryPackage
+}
+
+{{- if .ConfmapConverters }}
+
+type converterFactory struct {
+	confmap.ConverterFactory
+	configFactoryPackage
+}
+{{- end }}
+
 func main() {
 	info := component.BuildInfo{
 		Command:     {{ printf "%q" .Distribution.Name }},
@@ -31,13 +48,13 @@ func main() {
 			ResolverSettings: confmap.ResolverSettings{
 				ProviderFactories: []confmap.ProviderFactory{
 					{{- range .ConfmapProviders}}
-					{{.Name}}.NewFactory(),
+					providerFactory{ {{.Name}}.NewFactory(), {{ printf "%q" .Import }} },
 					{{- end}}
 				},
 				{{- if .ConfmapConverters }}
 				ConverterFactories: []confmap.ConverterFactory{
 					{{- range .ConfmapConverters}}
-					{{.Name}}.NewFactory(),
+					converterFactory{ {{.Name}}.NewFactory(), {{ printf "%q" .Import }} },
 					{{- end}}
 				},
 				{{- end }}

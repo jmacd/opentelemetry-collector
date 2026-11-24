@@ -80,11 +80,10 @@ func LoadMetadata(filePath string) (Metadata, error) {
 	if err != nil {
 		return md, err
 	}
-	packageName, err := packageName(filepath.Dir(filePath))
+	md.goPackage, md.PackageName, err = goPackageInfo(filepath.Dir(filePath))
 	if err != nil {
 		return md, fmt.Errorf("unable to determine package name: %w", err)
 	}
-	md.PackageName = packageName
 
 	if md.Status != nil {
 		md.GithubLabel, err = githubLabel(filepath.Dir(filePath), md.Status.Class, md.ShortFolderName)
@@ -94,7 +93,7 @@ func LoadMetadata(filePath string) (Metadata, error) {
 	}
 
 	if md.ScopeName == "" {
-		md.ScopeName = packageName
+		md.ScopeName = md.PackageName
 	}
 	if md.GeneratedPackageName == "" {
 		md.GeneratedPackageName = "metadata"
@@ -175,16 +174,20 @@ func githubLabel(componentDir, class, shortName string) (string, error) {
 	return fallback, nil
 }
 
-func packageName(filePath string) (string, error) {
-	cmd := exec.Command("go", "list", "-f", "{{.ImportPath}}")
+func goPackageInfo(filePath string) (string, string, error) {
+	cmd := exec.Command("go", "list", "-f", "{{.Name}} {{.ImportPath}}")
 	cmd.Dir = filePath
 	output, err := cmd.Output()
 	if err != nil {
 		if ee, ok := errors.AsType[*exec.ExitError](err); ok {
-			return "", fmt.Errorf("unable to determine package name: %v failed: (stderr) %v", cmd.Args, string(ee.Stderr))
+			return "", "", fmt.Errorf("unable to determine package name: %v failed: (stderr) %v", cmd.Args, string(ee.Stderr))
 		}
 
-		return "", fmt.Errorf("unable to determine package name: %v failed: %v %w", cmd.Args, string(output), err)
+		return "", "", fmt.Errorf("unable to determine package name: %v failed: %v %w", cmd.Args, string(output), err)
 	}
-	return strings.TrimSpace(string(output)), nil
+	name, importPath, ok := strings.Cut(strings.TrimSpace(string(output)), " ")
+	if !ok {
+		return "", "", fmt.Errorf("unexpected go list package information: %q", output)
+	}
+	return name, importPath, nil
 }

@@ -71,8 +71,9 @@ type Metadata struct {
 	Tests Tests `mapstructure:"tests"`
 	// SendingQueue declares the exporter queue/batch sender defaults.
 	SendingQueue *SendingQueue `mapstructure:"sending_queue"`
-	// PackageName is the name of the package where the component is defined.
+	// PackageName is the import path of the package where the component is defined.
 	PackageName string `mapstructure:"package_name"`
+	goPackage   string
 	// FeatureGates that are managed by the component.
 	FeatureGates []FeatureGate `mapstructure:"feature_gates"`
 	// Config is the configuration schemas for the component.
