@@ -341,8 +341,20 @@ explicitly agree on this, and use a "No migration is offered for this component"
 
 To log this guidance at startup, call the generated helper in the create function
 for the deprecated signal or connector route, for example `metadata.LogDeprecationForTracesToMetrics(set.Logger)`.
-The notice defaults to `warn`. To override it, set `level` to `debug`, `info`, or `error`
-beside `migration` in the corresponding `metadata.yaml` entry.
+The notice defaults to `warn`; `level` can override it with `debug`, `info`, or `error`.
+For example, this `metadata.yaml` excerpt logs the traces-to-metrics migration notice at `info`:
+
+```yaml
+status:
+  class: connector
+  stability:
+    deprecated: [traces_to_metrics]
+  deprecation:
+    traces_to_metrics:
+      date: "2026-01-15"
+      migration: "See https://example.org/connector-migration for the replacement configuration."
+      level: info
+```
 
 ## Versioning
 
